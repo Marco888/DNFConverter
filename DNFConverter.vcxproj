@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{1db1c969-2bf0-44c8-9313-6f8772490169}</ProjectGuid>
+    <RootNamespace>DNFConverter</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v142</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_WARNINGS;BUILD_WINDOWS;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <AdditionalIncludeDirectories>Core\Inc;Core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_WARNINGS;BUILD_WINDOWS;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalIncludeDirectories>Core\Inc;Core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ExceptionHandling>Async</ExceptionHandling>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="Core\Core.cpp" />
+    <ClCompile Include="Core\UnAnsi.cpp" />
+    <ClCompile Include="Core\UnBits.cpp" />
+    <ClCompile Include="Core\UnGUID.cpp" />
+    <ClCompile Include="Core\UnMath.cpp" />
+    <ClCompile Include="Core\UnMem.cpp" />
+    <ClCompile Include="Core\UnMisc.cpp" />
+    <ClCompile Include="Core\UnName.cpp" />
+    <ClCompile Include="Core\UnThreadingWindows.cpp" />
+    <ClCompile Include="Core\UnVcWin32.cpp" />
+    <ClCompile Include="DNFConverter.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Core\CorePrivate.h" />
+    <ClInclude Include="Core\Inc\Core.h" />
+    <ClInclude Include="Core\Inc\FConfigCacheIni.h" />
+    <ClInclude Include="Core\Inc\FFeedbackContextAnsi.h" />
+    <ClInclude Include="Core\Inc\FFeedbackContextWindows.h" />
+    <ClInclude Include="Core\Inc\FFileManagerAnsi.h" />
+    <ClInclude Include="Core\Inc\FFileManagerArc.h" />
+    <ClInclude Include="Core\Inc\FFileManagerGeneric.h" />
+    <ClInclude Include="Core\Inc\FFileManagerWindows.h" />
+    <ClInclude Include="Core\Inc\FMallocAnsi.h" />
+    <ClInclude Include="Core\Inc\FMallocDebug.h" />
+    <ClInclude Include="Core\Inc\FMallocDebugProxyWindows.h" />
+    <ClInclude Include="Core\Inc\FMallocThreadSafeProxy.h" />
+    <ClInclude Include="Core\Inc\FMallocWindows.h" />
+    <ClInclude Include="Core\Inc\FOutputDeviceAnsiError.h" />
+    <ClInclude Include="Core\Inc\FOutputDeviceConsoleWindows.h" />
+    <ClInclude Include="Core\Inc\FOutputDeviceDebug.h" />
+    <ClInclude Include="Core\Inc\FOutputDeviceFile.h" />
+    <ClInclude Include="Core\Inc\FOutputDeviceNull.h" />
+    <ClInclude Include="Core\Inc\FOutputDeviceRedirector.h" />
+    <ClInclude Include="Core\Inc\FOutputDeviceStdout.h" />
+    <ClInclude Include="Core\Inc\FOutputDeviceWindowsError.h" />
+    <ClInclude Include="Core\Inc\FRiffChunk.h" />
+    <ClInclude Include="Core\Inc\OpCode.h" />
+    <ClInclude Include="Core\Inc\UnArc.h" />
+    <ClInclude Include="Core\Inc\UnBits.h" />
+    <ClInclude Include="Core\Inc\UnBuild.h" />
+    <ClInclude Include="Core\Inc\UnFile.h" />
+    <ClInclude Include="Core\Inc\UnMath.h" />
+    <ClInclude Include="Core\Inc\UnMem.h" />
+    <ClInclude Include="Core\Inc\UnMsg.h" />
+    <ClInclude Include="Core\Inc\UnName.h" />
+    <ClInclude Include="Core\Inc\UnNames.h" />
+    <ClInclude Include="Core\Inc\UnTemplate.h" />
+    <ClInclude Include="Core\Inc\UnThreadingBase.h" />
+    <ClInclude Include="Core\Inc\UnThreadingWindows.h" />
+    <ClInclude Include="Core\Inc\UnVcWin32.h" />
+    <ClInclude Include="DnfMesh.h" />
+    <ClInclude Include="UnLinker.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

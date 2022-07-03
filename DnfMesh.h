@@ -1,0 +1,2112 @@
+#pragma once
+
+typedef unsigned long NDword;
+typedef unsigned short NWord;
+typedef signed short NSWord;
+
+#define CPJ_HDR_RIFF_MAGIC		"RIFF"
+#define CPJ_HDR_FORM_MAGIC		"CPJB"
+
+#define KRN_MEMCAST(xtype,xvar)		(*((xtype*)&(xvar)))
+#define KRN_FOURCC(xstr)			(*((NDword*)xstr))
+
+#define CPJVECTOR FVector
+#define CPJQUAT FQuat
+
+// Byte describing effects for a mesh triangle.
+enum EJSMeshTriType
+{
+	// Triangle types. Mutually exclusive.
+	MTT_Normal = 0,	// Normal one-sided.
+	MTT_NormalTwoSided = 1,    // Normal but two-sided.
+	MTT_Translucent = 2,	// Translucent two-sided.
+	MTT_Masked = 3,	// Masked two-sided.
+	MTT_Modulate = 4,	// Modulation blended two-sided.
+	MTT_AlphaBlend = 5,	// Alphablend two-sided.
+	MTT_Placeholder = 8,	// Placeholder triangle for positioning weapon. Invisible.
+	// Bit flags.
+	MTT_Unlit = 16,	// Full brightness, no lighting.
+	MTT_Flat = 32,	// Flat surface, don't do bMeshCurvy thing.
+	MTT_Environment = 64,	// Environment mapped.
+	MTT_NoSmooth = 128,	// No bilinear filtering on this poly's texture.
+};
+
+struct FUVMap
+{
+	FLOAT U, V;
+
+	inline void Set(FLOAT InU, FLOAT InV)
+	{
+		U = InU;
+		V = InV;
+	}
+};
+
+static TCHAR MagicResult[5] = { 0,0,0,0,0 };
+inline const TCHAR* DecodeMagic(NDword mg)
+{
+	MagicResult[0] = (mg & 0xFF);
+	MagicResult[1] = ((mg >> 8) & 0xFF);
+	MagicResult[2] = ((mg >> 16) & 0xFF);
+	MagicResult[3] = ((mg >> 24) & 0xFF);
+	return MagicResult;
+}
+
+struct SCpjFileHeader
+{
+	NDword riffMagic; // CPJ_HDR_RIFF_MAGIC
+	NDword lenFile; // length of file following this value
+	NDword formMagic; // CPJ_HDR_FORM_MAGIC
+
+	friend FArchive& operator<<(FArchive& Ar, SCpjFileHeader& H)
+	{
+		return Ar << H.riffMagic << H.lenFile << H.formMagic;
+	}
+};
+struct SCpjChunkHeader
+{
+	NDword magic; // chunk-specific magic marker
+	NDword lenFile; // length of chunk following this value
+	NDword version; // chunk-specific format version
+	NDword timeStamp; // time stamp of chunk creation
+	NDword ofsName; // offset of chunk name string from start of chunk
+						   // If this value is zero, the chunk is nameless
+};
+struct SMacSection
+{
+	NDword ofsName; // offset of section name string in data block
+	NDword numCommands; // number of command strings in section
+	NDword firstCommand; // first command string index
+};
+struct CCpjMacSection
+{
+	FString name;
+	TArray<FString> commands;
+};
+struct SMacFile
+{
+	SCpjChunkHeader header; // header information
+
+	// sections (array of SMacSection)
+	NDword numSections; // number of sections
+	NDword ofsSections; // offset of sections in data block
+
+	// command strings (array of unsigned long, offsets into data block)
+	NDword numCommands; // number of commands
+	NDword ofsCommands; // offset of command strings in data block
+
+	// data block
+	BYTE dataBlock[256]; // variable sized data block
+};
+
+enum
+{
+	GEOVF_LODLOCK = 0x00000001 // vertex is locked during LOD processing
+};
+
+struct SGeoVert
+{
+	unsigned char flags; // GEOVF_ vertex flags
+	unsigned char groupIndex; // group index for vertex frame compression
+	unsigned short reserved; // reserved for future use, must be zero
+	unsigned short numEdgeLinks; // number of edges linked to this vertex
+	unsigned short numTriLinks; // number of triangles linked to this vertex
+	unsigned long firstEdgeLink; // first edge index in object link array
+	unsigned long firstTriLink; // first triangle index in object link array
+	CPJVECTOR refPosition; // reference position of vertex
+};
+struct SGeoEdge
+{
+	unsigned short headVertex; // vertex list index of edge's head vertex
+	unsigned short tailVertex; // vertex list index of edge's tail vertex
+	unsigned short invertedEdge; // edge list index of inverted mirror edge
+	unsigned short numTriLinks; // number of triangles linked to this edge
+	unsigned long firstTriLink; // first triangle index in object link array
+};
+struct SGeoTri
+{
+	unsigned short edgeRing[3]; // edge list indices used by triangle, whose
+								// tail vertices are V0, V1, and V2, in order
+	unsigned short reserved; // reserved for future use, must be zero
+};
+struct SGeoMount
+{
+	unsigned long ofsName; // offset of mount point name string in data block
+	unsigned long triIndex; // triangle index of mount base
+	CPJVECTOR triBarys; // barycentric coordinates of mount origin
+	CPJVECTOR baseScale; // base transform scaling
+	CPJQUAT baseRotate; // base transform rotation quaternion
+	CPJVECTOR baseTranslate; // base transform translation
+
+	// A mount's runtime transform is calculated as the base transform
+	// shifted out of a second transform determined by the triangle on the
+	// fly.  This transform has a unit scale, a translation of the point on
+	// the triangle described by the given barycentric coordinates, and a
+	// rotation described by a specific axial frame.  This axial frame has
+	// a Y axis that is the normal of the triangle, a Z axis that is the
+	// normalized vector from the mount origin point to the triangle's V0,
+	// and a X axis that is the cross product of these Y and Z axes.
+};
+struct SGeoFile
+{
+	SCpjChunkHeader header; // header information
+
+	// vertices (array of SGeoVert)
+	NDword numVertices; // number of vertices
+	NDword ofsVertices; // offset of vertices in data block
+
+	// edges (array of SGeoEdge)
+	NDword numEdges; // number of edges
+	NDword ofsEdges; // offset of edges in data block
+
+	// triangles (array of SGeoTri)
+	NDword numTris; // number of triangles
+	NDword ofsTris; // offset of triangles in data block
+
+	// mount points (array of SGeoMount)
+	NDword numMounts; // number of mounts
+	NDword ofsMounts; // offset of mounts in data block
+
+	// object links (array of unsigned short)
+	NDword numObjLinks; // number of object links
+	NDword ofsObjLinks; // number of object links in data
+
+	// data block
+	BYTE dataBlock[256]; // variable sized data block
+};
+
+struct FVector3v
+{
+	FQuat r; // axial frame (rotation)
+	FVector t; // local origin (translation)
+	FVector s; // axis scale values (scale)
+};
+
+struct CCpjGeoVert
+{
+	BYTE flags;
+	BYTE groupIndex;
+	FVector refPosition;
+	INT iVertex;
+	BYTE RefCount;
+	TArray<struct CCpjGeoEdge*> edgeLinks;
+	TArray<struct CCpjGeoTri*> triLinks;
+};
+struct CCpjGeoEdge
+{
+	CCpjGeoVert* headVertex;
+	CCpjGeoVert* tailVertex;
+	CCpjGeoEdge* invertedEdge;
+	TArray<struct CCpjGeoTri*> triLinks;
+
+	CCpjGeoEdge() { headVertex = tailVertex = NULL; invertedEdge = NULL; }
+};
+struct CCpjGeoTri
+{
+	CCpjGeoEdge* edgeRing[3];
+};
+struct CCpjGeoMount
+{
+	TCHAR name[64];
+	NDword triIndex;
+	FVector triBarys;
+	FVector3v baseCoords;
+};
+
+struct SSrfTex
+{
+	unsigned long ofsName; // offset of texture name string in data block
+	unsigned long ofsRefName; // offset of optional reference name in block
+};
+enum
+{
+	SRFTF_INACTIVE = 0x00000001, // triangle is not active
+	SRFTF_HIDDEN = 0x00000002, // present but invisible
+	SRFTF_VNIGNORE = 0x00000004, // ignored in vertex normal calculations
+	SRFTF_TRANSPARENT = 0x00000008, // transparent rendering is enabled
+	SRFTF_UNLIT = 0x00000020, // not affected by dynamic lighting
+	SRFTF_TWOSIDED = 0x00000040, // visible from both sides
+	SRFTF_MASKING = 0x00000080, // color key masking is active
+	SRFTF_MODULATED = 0x00000100, // modulated rendering is enabled
+	SRFTF_ENVMAP = 0x00000200, // environment mapped
+	SRFTF_NONCOLLIDE = 0x00000400, // traceray won't collide with this surface
+	SRFTF_TEXBLEND = 0x00000800,
+	SRFTF_ZLATER = 0x00001000,
+	SRFTF_RESERVED = 0x00010000
+};
+enum ESrfGlaze
+{
+	SRFGLAZE_NONE = 0,	// no glaze pass
+	SRFGLAZE_SPECULAR	// fake specular glaze
+};
+struct SSrfTri
+{
+	unsigned short uvIndex[3]; // UV texture coordinate indices used
+	unsigned char texIndex; // surface texture index
+	unsigned char reserved; // reserved for future use, must be zero
+	unsigned long flags; // SRFTF_ triangle flags
+	unsigned char smoothGroup; // light smoothing group
+	unsigned char alphaLevel; // transparent/modulated alpha level
+	unsigned char glazeTexIndex; // second-pass glaze texture index if used
+	unsigned char glazeFunc; // ESrfGlaze second-pass glaze function
+};
+struct SSrfUV
+{
+	float u; // texture U coordinate
+	float v; // texture V coordinate
+};
+struct SSrfFile
+{
+	SCpjChunkHeader header; // header information
+
+	// textures (array of SSrfTex)
+	unsigned long numTextures; // number of textures
+	unsigned long ofsTextures; // offset of textures in data block
+
+	// triangles (array of SSrfTri)
+	unsigned long numTris; // number of triangles
+	unsigned long ofsTris; // offset of triangles in data block
+
+	// UV texture coordinates (array of SSrfUV)
+	unsigned long numUV; // number of UV texture coordinates
+	unsigned long ofsUV; // offset of UV texture coordinates in data block
+
+	// data block
+	BYTE dataBlock[128]; // variable sized data block
+};
+
+struct CCpjSrfTex
+{
+	TCHAR name[128];
+	TCHAR refName[128];
+};
+struct CCpjSrfTri
+{
+	NWord uvIndex[3];
+	BYTE texIndex;
+	NDword flags;
+	BYTE smoothGroup;
+	BYTE alphaLevel;
+	BYTE glazeTexIndex;
+	BYTE glazeFunc;
+
+	CCpjSrfTri()
+	{
+		uvIndex[0] = uvIndex[1] = uvIndex[2] = 0;
+		texIndex = 0;
+		flags = 0x00000001; // SRFTF_INACTIVE;
+		smoothGroup = alphaLevel = glazeTexIndex = glazeFunc = 0;
+	}
+	inline BYTE GetMTFlags() const
+	{
+		BYTE Result = MTT_Normal;
+		if (flags & SRFTF_TRANSPARENT)
+			Result = MTT_Translucent;
+		else if (flags & SRFTF_MODULATED)
+			Result = MTT_Modulate;
+		else if (flags & SRFTF_MASKING)
+			Result = MTT_Masked;
+		else if (flags & SRFTF_TWOSIDED)
+			Result = MTT_NormalTwoSided;
+		if (flags & SRFTF_ENVMAP)
+			Result |= MTT_Environment;
+		if (flags & SRFTF_UNLIT)
+			Result |= MTT_Unlit;
+		return Result;
+	}
+};
+
+struct SSklBone
+{
+	unsigned long ofsName; // offset of bone name string in data block
+	unsigned long parentIndex; // parent bone index, -1 if none
+	CPJVECTOR baseScale; // base transform scaling
+	CPJQUAT baseRotate; // base transform rotation quaternion
+	CPJVECTOR baseTranslate; // base transform translation
+	float length; // length of the bone, used for rotation adjustments
+};
+struct SSklVert
+{
+	unsigned short numWeights; // number of skeletal weights
+	unsigned short firstWeight; // first index in skeletal weights
+};
+struct SSklWeight
+{
+	unsigned long boneIndex; // index of bone used by weight
+	float weightFactor; // weighting factor, [0.0-1.0]
+	CPJVECTOR offsetPos; // offset position vector
+};
+struct SSklMount
+{
+	unsigned long ofsName; // offset of mount point name string in data block
+	unsigned long boneIndex; // bone index of mount base, -1 if origin
+	CPJVECTOR baseScale; // base transform scaling
+	CPJQUAT baseRotate; // base transform rotation quaternion
+	CPJVECTOR baseTranslate; // base transform translation
+};
+struct SSklFile
+{
+	SCpjChunkHeader header; // header information
+
+	// skeletal bones (array of SSklBone)
+	unsigned long numBones; // number of skeletal bones
+	unsigned long ofsBones; // offset of skeletal bones in data block
+
+	// skeletal vertices (array of SSklVert)
+	unsigned long numVerts; // number of skeletal vertices
+	unsigned long ofsVerts; // offset of skeletal vertices in data block
+
+	// skeletal weights (array of SSklWeight)
+	unsigned long numWeights; // number of skeletal weights
+	unsigned long ofsWeights; // offset of skeletal weights in data block
+
+	// bone mounts (array of SSklMount)
+	unsigned long numMounts; // number of bone mounts
+	unsigned long ofsMounts; // offset of bone mounts in data block
+
+	// data block
+	BYTE dataBlock[128]; // variable sized data block
+};
+
+struct CCpjSklBone
+{
+	FString name;
+	CCpjSklBone* parentBone;
+	FVector3v baseCoords;
+	FLOAT length;
+	INT Index;
+};
+struct CCpjSklWeight
+{
+	CCpjSklBone* bone;
+	FLOAT factor;
+	FVector offsetPos;
+};
+struct CCpjSklVert
+{
+	TArray<CCpjSklWeight> weights;
+};
+struct CCpjSklMount
+{
+	FString name;
+	CCpjSklBone* bone;
+	FVector3v baseCoords;
+};
+
+struct SFrmBytePos
+{
+	unsigned char group; // compression group number
+	unsigned char pos[3]; // byte position
+};
+struct SFrmGroup
+{
+	CPJVECTOR byteScale; // scale byte positions by this
+	CPJVECTOR byteTranslate; // add to positions after scale
+};
+struct SFrmFrame
+{
+	unsigned long ofsFrameName; // offset of frame name in data block
+
+	// frame bounding box
+	CPJVECTOR bbMin; // bounding box minimum
+	CPJVECTOR bbMax; // bounding box maximum
+
+	// byte compression groups (array of SFrmGroup)
+	unsigned long numGroups; // number of byte compression groups, zero means
+							 // frame is uncompressed, otherwise compressed
+	unsigned long ofsGroups; // offset of groups in data block, if compressed
+
+	// vertex positions
+	// array of CPJVECTOR if uncompressed
+	// array of SFrmBytePos if compressed
+	unsigned long numVerts; // number of vertex positions
+	unsigned long ofsVerts; // offset of vertex positions in data block
+};
+struct SFrmFile
+{
+	SCpjChunkHeader header; // header information
+
+	// bounding box of all frames
+	CPJVECTOR bbMin; // bounding box minimum
+	CPJVECTOR bbMax; // bounding box maximum
+
+	// vertex frames (array of SFrmFrame)
+	unsigned long numFrames; // number of vertex frames
+	unsigned long ofsFrames; // offset of vertex frames in data block
+
+	// data block
+	BYTE dataBlock[128]; // variable sized data block
+};
+
+struct CCpjFrmBytePos
+{
+	BYTE group;
+	BYTE pos[3];
+};
+struct CCpjFrmGroup
+{
+	FVector scale;
+	FVector translate;
+};
+struct CCpjFrmFrame
+{
+	FString m_Name;
+	UBOOL m_isCompressed;
+	TArray<CCpjFrmGroup> m_Groups;
+	TArray<CCpjFrmBytePos> m_BytePos;
+	TArray<FVector> m_PurePos;
+	FBox m_Bounds;
+};
+
+struct SSeqBoneInfo
+{
+	unsigned long ofsName; // offset of bone name string in data block
+	float srcLength; // source skeleton bone length
+};
+struct SSeqBoneTranslate
+{
+	unsigned short boneIndex; // bone info index
+	unsigned short reserved; // must be zero
+	CPJVECTOR translate; // translation vector
+};
+struct SSeqBoneRotate
+{
+	unsigned short boneIndex; // bone info index
+	signed short roll; // roll about Z axis in 64k degrees, followed by...
+	signed short pitch; // pitch about X axis in 64k degrees, followed by...
+	signed short yaw; // yaw about Y axis in 64k degrees
+};
+struct SSeqBoneScale
+{
+	unsigned short boneIndex; // bone info index
+	unsigned short reserved; // must be zero
+	CPJVECTOR scale; // component scaling values
+};
+
+#define CPJ_SEQEV_FOURCC(a,b,c,d) ((a)+((b)<<8)+((c)<<16)+((d)<<24))
+
+enum ESeqEvent
+{
+	SEQEV_INVALID = 0,
+	// string is a marker, not an actual event
+	SEQEV_MARKER = CPJ_SEQEV_FOURCC('M', 'R', 'K', 'R'),
+	// fire a trigger notification string, application specific use
+	SEQEV_TRIGGER = CPJ_SEQEV_FOURCC('T', 'R', 'I', 'G'),
+	// send a MAC chunk command to the backing actor
+	SEQEV_ACTORCMD = CPJ_SEQEV_FOURCC('A', 'C', 'M', 'D'),
+	// triangle flag alteration, string is a character string of hex digits,
+	// one byte per triangle (length should match surface chunk triangle
+	// count), for 4 possible flags.  Hex digits A through F must be uppercase.
+	// Bit 0: Triangle is hidden
+	// Bit 1-3: Currently unused
+	SEQEV_TRIFLAGS = CPJ_SEQEV_FOURCC('T', 'F', 'L', 'G'),
+};
+struct SSeqFrame
+{
+	unsigned char reserved; // reserved for future use, must be zero
+	unsigned char numBoneTranslate; // number of bone translations
+	unsigned char numBoneRotate; // number of bone rotations
+	unsigned char numBoneScale; // number of bone scalings
+	unsigned long firstBoneTranslate; // first bone translation index
+	unsigned long firstBoneRotate; // first bone rotation index
+	unsigned long firstBoneScale; // first bone scaling index
+	unsigned long ofsVertFrameName; // offset of vertex frame name in data
+									// block or -1 if no vertex frame is used
+};
+struct SSeqEvent
+{
+	unsigned long eventType; // ESeqEvent event type
+	float time; // sequence time of event, from zero to one
+	unsigned long ofsParam; // offset of parameter string in data block,
+							// or -1 if string not used
+};
+struct SSeqFile
+{
+	SCpjChunkHeader header; // header information
+
+	// global sequence information
+	float playRate; // sequence play rate in frames per second
+
+	// sequence frames
+	unsigned long numFrames; // number of sequence frames
+	unsigned long ofsFrames; // offset of sequence frames in data
+
+	// sequence events, in chronological order
+	unsigned long numEvents; // number of events
+	unsigned long ofsEvents; // offset of events in data
+
+	// bone info (array of SSeqBoneInfo)
+	unsigned long numBoneInfo; // number of bone info
+	unsigned long ofsBoneInfo; // offset of bone info in data block
+
+	// bone translations (array of SSeqBoneTranslate)
+	unsigned long numBoneTranslate; // number of bone translations
+	unsigned long ofsBoneTranslate; // offset of bone translations in data
+
+	// bone rotations (array of SSeqBoneRotate)
+	unsigned long numBoneRotate; // number of bone rotations
+	unsigned long ofsBoneRotate; // offset of bone rotations in data
+
+	// bone scalings (array of SSeqBoneScale)
+	unsigned long numBoneScale; // number of bone scalings
+	unsigned long ofsBoneScale; // offset of bone scalings in data
+
+	// data block
+	BYTE dataBlock[128]; // variable sized data block
+};
+
+struct CCpjSeqBoneInfo
+{
+	FString name;
+	FLOAT srcLength;
+};
+struct CCpjSeqTranslate
+{
+public:
+	NWord boneIndex;
+	NWord reserved;
+	FVector translate;
+};
+struct CCpjSeqRotate
+{
+public:
+	NWord boneIndex;
+	NSWord roll;
+	NSWord pitch;
+	NSWord yaw;
+	FQuat quat;
+};
+struct CCpjSeqScale
+{
+	NWord boneIndex;
+	NWord reserved;
+	FVector scale;
+};
+struct CCpjSeqFrame
+{
+	FString vertFrameName;
+	TArray<CCpjSeqTranslate> translates;
+	TArray<CCpjSeqRotate> rotates;
+	TArray<CCpjSeqScale> scales;
+};
+struct CCpjSeqEvent
+{
+	NDword eventType;
+	FLOAT time;
+	FString paramString;
+};
+
+struct SLodTri
+{
+	unsigned long srfTriIndex; // original surface triangle index
+	unsigned short vertIndex[3]; // relayed vertex indices used by triangle
+	unsigned short uvIndex[3]; // surface UV indices used by triangle
+};
+struct SLodLevel
+{
+	float detail; // maximum detail value of this level, from zero to one
+	unsigned long numTriangles; // number of triangles in level
+	unsigned long numVertRelay; // number of vertices in level relay
+	unsigned long firstTriangle; // first triangle in triangle list
+	unsigned long firstVertRelay; // first index in vertex relay
+};
+struct SLodFile
+{
+	SCpjChunkHeader header; // header information
+
+	// levels (array of SLodLevel)
+	unsigned long numLevels; // number of levels
+	unsigned long ofsLevels; // offset of levels in data block
+
+	// triangles (array of SLodTri)
+	unsigned long numTriangles; // number of triangles
+	unsigned long ofsTriangles; // offset of triangles in data block
+
+	// vertex relay (array of unsigned short)
+	unsigned long numVertRelay; // number of vertices in relay
+	unsigned long ofsVertRelay; // offset of vertex relay in data block
+
+	// data block
+	BYTE dataBlock[128]; // variable sized data block
+};
+struct CCpjLodTri
+{
+	NDword srfTriIndex;
+	NWord vertIndex[3];
+	NWord uvIndex[3];
+};
+struct CCpjLodLevel
+{
+	FLOAT detail;
+	TArray<NWord> vertRelay;
+	TArray<CCpjLodTri> triangles;
+};
+
+inline FVector ToUECoords(const FVector& V)
+{
+	return FVector(V.Z, -V.X, V.Y);
+}
+inline FQuat ToUEQuat(const FQuat& Q)
+{
+	return FQuat(Q.X, -Q.Z, Q.Y, Q.W);
+}
+
+inline FString ReadStringByte(BYTE* Data)
+{
+	if (!*Data)
+		return FString();
+	FString Result;
+	TArray<TCHAR>& SA = Result.GetCharArray();
+	while (*Data)
+	{
+		SA.AddItem(*Data);
+		++Data;
+	}
+	SA.AddItem(0);
+	return Result;
+}
+inline void StrByteCopy(TCHAR* Dest, const BYTE* Src, INT MaxLen)
+{
+	INT i = 0;
+	--MaxLen;
+	for (; (i < MaxLen && Src[i]); ++i)
+		Dest[i] = (TCHAR)Src[i];
+	Dest[i] = 0;
+}
+
+struct FAnimSequence
+{
+	FString AnimName;
+	FLOAT m_Rate;
+	TArray<CCpjSeqFrame> m_Frames;
+	TArray<CCpjSeqEvent> m_Events;
+	TArray<CCpjSeqBoneInfo> m_BoneInfo;
+};
+
+class DnfMesh
+{
+	FString CurFile;
+
+	TArray<FAnimSequence> Animations; // Sequences
+	TArray<CCpjMacSection> m_Sections; // MAC
+
+	TArray<CCpjGeoVert> m_Verts; // Geometry
+	TArray<CCpjGeoEdge> m_Edges; // Geometry
+	TArray<CCpjGeoTri> m_Tris; // Geometry
+	TArray<CCpjGeoMount> m_Mounts; // Geometry
+
+	TArray<CCpjSrfTex> m_Textures; // Surfaces
+	TArray<CCpjSrfTri> sm_Tris; // Surfaces
+	TArray<FUVMap> m_UV; // Surfaces
+
+	TArray<CCpjSklBone> skm_Bones; // Skeleton
+	TArray<CCpjSklVert> skm_Verts; // Skeleton
+	TArray<CCpjSklMount> skm_Mounts; // Skeleton
+
+	TArray<CCpjLodLevel> m_Levels; // LOD
+
+	FBox m_Bounds;
+	TArray<CCpjFrmFrame> m_Frames; // Anim frames
+
+	FVector VertOrigin, VertScaling;
+
+	TArray<FString> ExportedTex;
+
+	inline const CCpjFrmFrame* FindFrame(const TCHAR* FrameName) const
+	{
+		for (INT i = 0; i < m_Frames.Num(); ++i)
+			if (m_Frames(i).m_Name == FrameName)
+				return &m_Frames(i);
+		return nullptr;
+	}
+	inline void Clear()
+	{
+		CurFile.Empty();
+		Animations.Empty();
+		m_Sections.Empty();
+		m_Verts.Empty();
+		m_Edges.Empty();
+		m_Tris.Empty();
+		m_Mounts.Empty();
+		m_Textures.Empty();
+		sm_Tris.Empty();
+		m_UV.Empty();
+		skm_Bones.Empty();
+		skm_Verts.Empty();
+		skm_Mounts.Empty();
+		m_Levels.Empty();
+		m_Frames.Empty();
+	}
+	inline void CalcBestScaling()
+	{
+		FBox TotalBounds(0);
+		for (INT i = 0; i < m_Frames.Num(); ++i)
+		{
+			for (INT j = (m_Frames(i).m_PurePos.Num() - 1); j >= 0; --j)
+				TotalBounds += m_Frames(i).m_PurePos(j);
+		}
+		TotalBounds.GetCenterAndExtents(VertOrigin, VertScaling);
+		VertScaling = FVector(1023.f / VertScaling.X, 1023.f / VertScaling.Y, 511.f / VertScaling.Z);
+	}
+	inline FVector PreMulti(const FVector& V) const
+	{
+		return (V - VertOrigin) * VertScaling;
+	}
+	inline const TCHAR* ReadString(FArchive& Ar)
+	{
+		static TCHAR v[1024];
+		TCHAR* p = v;
+		BYTE ch;
+		while (1)
+		{
+			Ar << ch;
+			*p++ = ch;
+			if (!ch)
+				break;
+		}
+		return v;
+	}
+	UBOOL LoadFile(FArchive& Ar, const TCHAR* GroupName)
+	{
+		SCpjFileHeader header;
+		Ar << header;
+		debugfSlow(TEXT("riffMagic %ls"), DecodeMagic(header.riffMagic));
+		debugfSlow(TEXT("formMagic %ls"), DecodeMagic(header.formMagic));
+		if ((header.riffMagic != KRN_FOURCC(CPJ_HDR_RIFF_MAGIC))
+			|| (header.formMagic != KRN_FOURCC(CPJ_HDR_FORM_MAGIC)))
+		{
+			warnf(TEXT("Failed to load CPJ file - Invalid header!"));
+			return FALSE;
+		}
+
+		Clear();
+		NDword i, j;
+		SCpjFileHeader SubHrd;
+		NDword position = sizeof(SCpjFileHeader);
+		UBOOL bIsLoop = FALSE;
+		while (1)
+		{
+			if (bIsLoop)
+			{
+				// set position to start of next chunk
+				position += (SubHrd.lenFile + 8);
+				if (SubHrd.lenFile & 1)
+					position++;
+			}
+			else bIsLoop = TRUE;
+
+			if (position >= (header.lenFile + 8))
+				break;
+
+			// seek to chunk position
+			Ar.Seek(position);
+
+			// read RIFF magic and length fields
+			Ar << SubHrd;
+			NDword timeStamp, ofsName;
+			Ar << timeStamp << ofsName;
+
+			if (ofsName)
+			{
+				Ar.Seek(position + ofsName);
+				FString SecName = ReadString(Ar);
+				debugfSlow(TEXT("Section %ls (%ls) Len %i Offset %i -> %i"), DecodeMagic(SubHrd.riffMagic), *SecName, INT(SubHrd.lenFile), INT(position), INT(position + SubHrd.lenFile + 8));
+
+				Ar.Seek(position);
+				const INT proxyLen = SubHrd.lenFile + 8;
+				TArray<BYTE> fullData(proxyLen);
+				Ar.Serialize(fullData.GetData(), proxyLen);
+
+				if (SubHrd.riffMagic == KRN_FOURCC("SEQB"))
+				{
+					// verify header
+					SSeqFile* file = reinterpret_cast<SSeqFile*>(fullData.GetData());
+					if (file->header.version != 1)
+						warnf(TEXT("Invalid SEQB ver (%i)"), INT(file->header.version));
+
+					// set up image data pointers
+					SSeqFrame* fileFrames = reinterpret_cast<SSeqFrame*>(&file->dataBlock[file->ofsFrames]);
+					SSeqEvent* fileEvents = reinterpret_cast<SSeqEvent*>(&file->dataBlock[file->ofsEvents]);
+					SSeqBoneInfo* fileBoneInfo = reinterpret_cast<SSeqBoneInfo*>(&file->dataBlock[file->ofsBoneInfo]);
+					SSeqBoneTranslate* fileBoneTranslate = reinterpret_cast<SSeqBoneTranslate*>(&file->dataBlock[file->ofsBoneTranslate]);
+					SSeqBoneRotate* fileBoneRotate = reinterpret_cast<SSeqBoneRotate*>(&file->dataBlock[file->ofsBoneRotate]);
+					SSeqBoneScale* fileBoneScale = reinterpret_cast<SSeqBoneScale*>(&file->dataBlock[file->ofsBoneScale]);
+
+					FAnimSequence* as = new (Animations) FAnimSequence();
+					as->AnimName = SecName;
+
+					// remove old array data
+					as->m_Frames.Empty(file->numFrames); as->m_Frames.AddZeroed(file->numFrames);
+					as->m_Events.Empty(file->numEvents); as->m_Events.AddZeroed(file->numEvents);
+					as->m_BoneInfo.Empty(file->numBoneInfo); as->m_BoneInfo.AddZeroed(file->numBoneInfo);
+					as->m_Rate = file->playRate;
+
+					debugf(TEXT("Animation[%ls] Frames %i Events %i Bones %i"), *SecName, INT(file->numFrames), INT(file->numEvents), INT(file->numBoneInfo));
+
+					// frames
+					for (i = 0; i < file->numFrames; i++)
+					{
+						SSeqFrame* iF = &fileFrames[i];
+						CCpjSeqFrame* oF = &as->m_Frames(i);
+						if (iF->ofsVertFrameName != 0xFFFFFFFF)
+							oF->vertFrameName = ReadStringByte(&file->dataBlock[iF->ofsVertFrameName]);
+						oF->translates.Add(iF->numBoneTranslate);
+						for (j = 0; j < iF->numBoneTranslate; j++)
+						{
+							SSeqBoneTranslate* iT = &fileBoneTranslate[iF->firstBoneTranslate + j];
+							CCpjSeqTranslate* oT = &oF->translates(j);
+							oT->boneIndex = iT->boneIndex;
+							oT->translate = iT->translate;
+						}
+						oF->rotates.Add(iF->numBoneRotate);
+						for (j = 0; j < iF->numBoneRotate; j++)
+						{
+							SSeqBoneRotate* iR = &fileBoneRotate[iF->firstBoneRotate + j];
+							CCpjSeqRotate* oR = &oF->rotates(j);
+							oR->boneIndex = iR->boneIndex;
+							oR->roll = iR->roll;
+							oR->pitch = iR->pitch;
+							oR->yaw = iR->yaw;
+							oR->quat = ToUEQuat(FRotator(iR->pitch, iR->yaw, iR->roll).Quaternion());
+						}
+						oF->scales.Add(iF->numBoneScale);
+						for (j = 0; j < iF->numBoneScale; j++)
+						{
+							SSeqBoneScale* iS = &fileBoneScale[iF->firstBoneScale + j];
+							CCpjSeqScale* oS = &oF->scales(j);
+							oS->boneIndex = iS->boneIndex;
+							oS->scale = iS->scale;
+						}
+					}
+
+					// events
+					for (i = 0; i < file->numEvents; i++)
+					{
+						SSeqEvent* iE = &fileEvents[i];
+						CCpjSeqEvent* oE = &as->m_Events(i);
+						oE->eventType = iE->eventType;
+						oE->time = iE->time;
+						if (iE->ofsParam != 0xFFFFFFFF)
+							oE->paramString = ReadStringByte(&file->dataBlock[iE->ofsParam]);
+					}
+
+					// bone info
+					for (i = 0; i < file->numBoneInfo; i++)
+					{
+						SSeqBoneInfo* iI = &fileBoneInfo[i];
+						CCpjSeqBoneInfo* oI = &as->m_BoneInfo(i);
+						oI->name = ReadStringByte(&file->dataBlock[iI->ofsName]);
+						oI->srcLength = iI->srcLength;
+					}
+				}
+				else if (SubHrd.riffMagic == KRN_FOURCC("MACB"))
+				{
+					SMacFile* file = reinterpret_cast<SMacFile*>(fullData.GetData());
+
+					if (file->header.version != 1)
+						warnf(TEXT("Invalid MACB ver (%i)"), INT(file->header.version));
+
+					// set up image data pointers
+					SMacSection* fileSections = reinterpret_cast<SMacSection*>(&file->dataBlock[file->ofsSections]);
+					NDword* fileCommands = reinterpret_cast<NDword*>(&file->dataBlock[file->ofsCommands]);
+
+					// remove old array data
+					m_Sections.Empty(file->numSections);
+
+					// sections
+					for (i = 0; i < file->numSections; i++)
+					{
+						SMacSection* iS = &fileSections[i];
+						CCpjMacSection* oS = new (m_Sections) CCpjMacSection;
+						oS->name = ReadStringByte(&file->dataBlock[iS->ofsName]);
+						oS->commands.Empty(iS->numCommands);
+						for (j = 0; j < iS->numCommands; j++)
+						{
+							new (oS->commands) FString(ReadStringByte(&file->dataBlock[fileCommands[iS->firstCommand + j]]));
+						}
+					}
+				}
+				else if (SubHrd.riffMagic == KRN_FOURCC("GEOB"))
+				{
+					if (m_Verts.Num() && SecName != GroupName)
+						continue;
+
+					// verify header
+					SGeoFile* file = reinterpret_cast<SGeoFile*>(fullData.GetData());
+					if (file->header.version != 1)
+						warnf(TEXT("Invalid GEOB ver (%i)"), INT(file->header.version));
+
+					// set up image data pointers
+					SGeoVert* fileVerts = (SGeoVert*)(&file->dataBlock[file->ofsVertices]);
+					SGeoEdge* fileEdges = (SGeoEdge*)(&file->dataBlock[file->ofsEdges]);
+					SGeoTri* fileTris = (SGeoTri*)(&file->dataBlock[file->ofsTris]);
+					SGeoMount* fileMounts = (SGeoMount*)(&file->dataBlock[file->ofsMounts]);
+					NWord* fileObjLinks = (NWord*)(&file->dataBlock[file->ofsObjLinks]);
+
+					// remove old array data
+					m_Verts.Empty(file->numVertices); m_Verts.AddZeroed(file->numVertices);
+					m_Edges.Empty(file->numEdges); m_Edges.AddZeroed(file->numEdges);
+					m_Tris.Empty(file->numTris); m_Tris.AddZeroed(file->numTris);
+					m_Mounts.Empty(file->numMounts); m_Mounts.AddZeroed(file->numMounts);
+
+					debugf(TEXT("Geometry[%ls]: Verts %i Edges %i Tris %i Mounts %i"), *SecName, INT(file->numEdges), INT(file->numEdges), INT(file->numTris), INT(file->numMounts));
+
+					// vertices
+					for (i = 0; i < file->numVertices; i++)
+					{
+						SGeoVert* iV = &fileVerts[i];
+						CCpjGeoVert* oV = &m_Verts(i);
+						oV->iVertex = i;
+						oV->flags = iV->flags;
+						oV->groupIndex = iV->groupIndex;
+						oV->edgeLinks.Add(iV->numEdgeLinks);
+						for (j = 0; j < iV->numEdgeLinks; j++)
+							oV->edgeLinks(j) = &m_Edges(fileObjLinks[iV->firstEdgeLink + j]);
+						oV->triLinks.Add(iV->numTriLinks);
+						for (j = 0; j < iV->numTriLinks; j++)
+							oV->triLinks(j) = &m_Tris(fileObjLinks[iV->firstTriLink + j]);
+						oV->refPosition = iV->refPosition;
+					}
+
+					// edges
+					for (i = 0; i < file->numEdges; i++)
+					{
+						SGeoEdge* iE = &fileEdges[i];
+						CCpjGeoEdge* oE = &m_Edges(i);
+						oE->headVertex = &m_Verts(iE->headVertex);
+						oE->tailVertex = &m_Verts(iE->tailVertex);
+						oE->invertedEdge = &m_Edges(iE->invertedEdge);
+						oE->triLinks.Add(iE->numTriLinks);
+						for (j = 0; j < iE->numTriLinks; j++)
+							oE->triLinks(j) = &m_Tris(fileObjLinks[iE->firstTriLink + j]);
+					}
+
+					// triangles
+					for (i = 0; i < file->numTris; i++)
+					{
+						SGeoTri* iT = &fileTris[i];
+						CCpjGeoTri* oT = &m_Tris(i);
+						for (j = 0; j < 3; j++)
+						{
+							oT->edgeRing[j] = &m_Edges(iT->edgeRing[j]);
+							oT->edgeRing[j]->tailVertex->RefCount = TRUE;
+						}
+					}
+
+					// Check for unused vertices.
+					for (i = 0; i < file->numVertices; i++)
+					{
+						CCpjGeoVert* v = &m_Verts(i);
+						if (!v->RefCount)
+							debugf(TEXT("Vertex %i/%i is UNUSED"), i, file->numVertices);
+					}
+
+					// mount points
+					for (i = 0; i < file->numMounts; i++)
+					{
+						SGeoMount* iM = &fileMounts[i];
+						CCpjGeoMount* oM = &m_Mounts(i);
+						StrByteCopy(oM->name, &file->dataBlock[iM->ofsName], 64);
+						oM->triIndex = iM->triIndex;
+						oM->triBarys = iM->triBarys;
+						oM->baseCoords.s = iM->baseScale;
+						oM->baseCoords.r = iM->baseRotate;
+						oM->baseCoords.t = iM->baseTranslate;
+					}
+				}
+				else if (SubHrd.riffMagic == KRN_FOURCC("SRFB"))
+				{
+					if (sm_Tris.Num() && SecName != GroupName)
+						continue;
+
+					// verify header
+					SSrfFile* file = reinterpret_cast<SSrfFile*>(fullData.GetData());
+					if (file->header.version != 1)
+						warnf(TEXT("Invalid SRFB ver (%i)"), INT(file->header.version));
+
+					// set up image data pointers
+					SSrfTex* fileTextures = reinterpret_cast<SSrfTex*>(&file->dataBlock[file->ofsTextures]);
+					SSrfTri* fileTris = reinterpret_cast<SSrfTri*>(&file->dataBlock[file->ofsTris]);
+					SSrfUV* fileUV = reinterpret_cast<SSrfUV*>(&file->dataBlock[file->ofsUV]);
+
+					debugf(TEXT("Surface[%ls]: Textures %i Tris %i UV-Maps %i"), *SecName, INT(file->numTextures), INT(file->numTris), INT(file->numUV));
+
+					// remove old array data
+					m_Textures.Empty(file->numTextures); m_Textures.Add(file->numTextures);
+					sm_Tris.Empty(file->numTris); sm_Tris.Add(file->numTris);
+					m_UV.Empty(file->numUV); m_UV.Add(file->numUV);
+
+					// textures
+					for (i = 0; i < file->numTextures; i++)
+					{
+						StrByteCopy(m_Textures(i).name, &file->dataBlock[fileTextures[i].ofsName], 128);
+						StrByteCopy(m_Textures(i).refName, &file->dataBlock[fileTextures[i].ofsRefName], 128);
+					}
+
+					// triangles
+					for (i = 0; i < file->numTris; i++)
+					{
+						SSrfTri* iT = &fileTris[i];
+						CCpjSrfTri* oT = &sm_Tris(i);
+						for (NDword j = 0; j < 3; j++)
+							oT->uvIndex[j] = iT->uvIndex[j];
+						oT->texIndex = iT->texIndex;
+						oT->flags = iT->flags;
+						oT->smoothGroup = iT->smoothGroup;
+						oT->alphaLevel = iT->alphaLevel;
+						oT->glazeTexIndex = iT->glazeTexIndex;
+						oT->glazeFunc = iT->glazeFunc;
+					}
+
+					// texture vertex UVs
+					for (i = 0; i < file->numUV; i++)
+						m_UV(i).Set(fileUV[i].u, fileUV[i].v);
+				}
+				else if (SubHrd.riffMagic == KRN_FOURCC("LODB"))
+				{
+					// verify header
+					SLodFile* file = reinterpret_cast<SLodFile*>(fullData.GetData());
+					if (file->header.version < 3)
+					{
+						// old LOD format, ignore contents
+						debugf(TEXT("LOD[%ls]: Disabled!"), *SecName);
+					}
+					else
+					{
+						// set up image data pointers
+						SLodLevel* fileLevels = reinterpret_cast<SLodLevel*>(&file->dataBlock[file->ofsLevels]);
+						NWord* fileVertRelay = reinterpret_cast<NWord*>(&file->dataBlock[file->ofsVertRelay]);
+						SLodTri* fileTriangles = reinterpret_cast<SLodTri*>(&file->dataBlock[file->ofsTriangles]);
+
+						debugf(TEXT("LOD[%ls]: NumLodLevels %i"), *SecName, INT(file->numLevels));
+
+						// remove old array data
+						m_Levels.Empty(file->numLevels); m_Levels.AddZeroed(file->numLevels);
+
+						// levels
+						for (i = 0; i < file->numLevels; i++)
+						{
+							SLodLevel* iL = &fileLevels[i];
+							CCpjLodLevel* oL = &m_Levels(i);
+
+							oL->detail = iL->detail;
+							oL->vertRelay.Add(iL->numVertRelay);
+							for (j = 0; j < iL->numVertRelay; j++)
+								oL->vertRelay(j) = fileVertRelay[iL->firstVertRelay + j];
+							oL->triangles.Add(iL->numTriangles);
+							for (j = 0; j < iL->numTriangles; j++)
+							{
+								SLodTri* iT = &fileTriangles[iL->firstTriangle + j];
+								CCpjLodTri* oT = &oL->triangles(j);
+								oT->srfTriIndex = iT->srfTriIndex;
+								oT->vertIndex[0] = iT->vertIndex[0];
+								oT->vertIndex[1] = iT->vertIndex[1];
+								oT->vertIndex[2] = iT->vertIndex[2];
+								oT->uvIndex[0] = iT->uvIndex[0];
+								oT->uvIndex[1] = iT->uvIndex[1];
+								oT->uvIndex[2] = iT->uvIndex[2];
+							}
+						}
+					}
+				}
+				else if (SubHrd.riffMagic == KRN_FOURCC("SKLB"))
+				{
+					if (skm_Bones.Num() && SecName != GroupName)
+						continue;
+
+					// verify header
+					SSklFile* file = reinterpret_cast<SSklFile*>(fullData.GetData());
+					if (file->header.version != 1)
+						warnf(TEXT("Invalid SKLB ver (%i)"), INT(file->header.version));
+
+					// set up image data pointers
+					SSklBone* fileBones = (SSklBone*)(&file->dataBlock[file->ofsBones]);
+					SSklVert* fileVerts = (SSklVert*)(&file->dataBlock[file->ofsVerts]);
+					SSklWeight* fileWeights = (SSklWeight*)(&file->dataBlock[file->ofsWeights]);
+					SSklMount* fileMounts = (SSklMount*)(&file->dataBlock[file->ofsMounts]);
+
+					debugf(TEXT("SkeletalData[%ls]: Bones %i WeightedVerts %i SkeletalMounts %i"), *SecName, INT(file->numBones), INT(file->numVerts), INT(file->numMounts));
+
+					// remove old array data
+					skm_Bones.Empty(file->numBones); skm_Bones.AddZeroed(file->numBones);
+					skm_Verts.Empty(file->numVerts); skm_Verts.AddZeroed(file->numVerts);
+					skm_Mounts.Empty(file->numMounts); skm_Mounts.AddZeroed(file->numMounts);
+
+					// bones
+					for (i = 0; i < file->numBones; i++)
+					{
+						SSklBone* iB = &fileBones[i];
+						CCpjSklBone* oB = &skm_Bones(i);
+						oB->Index = i;
+						oB->name = ReadStringByte(&file->dataBlock[iB->ofsName]);
+						if (!oB->name.Len())
+							oB->name = FString::Printf(TEXT("Bone_%i"), INT(i));
+						oB->parentBone = NULL;
+						if (iB->parentIndex != 0xFFFFFFFF)
+							oB->parentBone = &skm_Bones(iB->parentIndex);
+						oB->baseCoords.s = iB->baseScale;
+						oB->baseCoords.r = iB->baseRotate;
+						oB->baseCoords.t = iB->baseTranslate;
+						oB->length = iB->length;
+					}
+
+					// vertices
+					for (i = 0; i < file->numVerts; i++)
+					{
+						SSklVert* iV = &fileVerts[i];
+						CCpjSklVert* oV = &skm_Verts(i);
+						oV->weights.Add(iV->numWeights);
+						for (j = 0; j < iV->numWeights; j++)
+						{
+							SSklWeight* iW = &fileWeights[iV->firstWeight + j];
+							CCpjSklWeight* oW = &oV->weights(j);
+							oW->bone = &skm_Bones(iW->boneIndex);
+							oW->factor = iW->weightFactor;
+							oW->offsetPos = iW->offsetPos;
+						}
+					}
+
+					// mounts
+					for (i = 0; i < file->numMounts; i++)
+					{
+						SSklMount* iM = &fileMounts[i];
+						CCpjSklMount* oM = &skm_Mounts(i);
+						oM->name = ReadStringByte(&file->dataBlock[iM->ofsName]);
+						oM->bone = NULL;
+						if (iM->boneIndex != 0xFFFFFFFF)
+							oM->bone = &skm_Bones(iM->boneIndex);
+						oM->baseCoords.s = iM->baseScale;
+						oM->baseCoords.r = ToUEQuat(iM->baseRotate);
+						oM->baseCoords.t = iM->baseTranslate;
+					}
+				}
+				else if (SubHrd.riffMagic == KRN_FOURCC("FRMB"))
+				{
+					if (m_Frames.Num() && SecName != GroupName)
+						continue;
+
+					// verify header
+					SFrmFile* file = reinterpret_cast<SFrmFile*>(fullData.GetData());
+					if (file->header.version != 1)
+						warnf(TEXT("Invalid FRMB ver (%i)"), INT(file->header.version));
+
+					// set up image data pointers
+					SFrmFrame* fileFrames = reinterpret_cast<SFrmFrame*>(&file->dataBlock[file->ofsFrames]);
+
+					// remove old array data
+					m_Frames.Empty(file->numFrames); m_Frames.AddZeroed(file->numFrames);
+
+					// bounding box
+					m_Bounds = FBox(file->bbMin, file->bbMax);
+
+					// frames
+					for (i = 0; i < file->numFrames; i++)
+					{
+						SFrmFrame* iF = &fileFrames[i];
+						CCpjFrmFrame* oF = &m_Frames(i);
+
+						oF->m_Name = ReadStringByte(&file->dataBlock[iF->ofsFrameName]);
+
+						// bounding box
+						oF->m_Bounds = FBox(ToUECoords(iF->bbMin), ToUECoords(iF->bbMax));
+
+						// set up image data pointers
+						SFrmGroup* fileGroups = reinterpret_cast<SFrmGroup*>(&file->dataBlock[iF->ofsGroups]);
+						FVector* fileVertsPure = reinterpret_cast<FVector*>(&file->dataBlock[iF->ofsVerts]);
+						SFrmBytePos* fileVertsByte = reinterpret_cast<SFrmBytePos*>(&file->dataBlock[iF->ofsVerts]);
+
+						oF->m_isCompressed = (iF->numGroups != 0);
+
+						if (oF->m_isCompressed)
+						{
+							// groups
+							oF->m_Groups.Add(iF->numGroups);
+							for (j = 0; j < iF->numGroups; j++)
+							{
+								oF->m_Groups(j).scale = fileGroups[j].byteScale;
+								oF->m_Groups(j).translate = fileGroups[j].byteTranslate;
+							}
+
+							// vertices
+							oF->m_BytePos.Add(iF->numVerts);
+
+							memcpy(&oF->m_BytePos(0), &fileVertsByte[0], iF->numVerts * sizeof(SFrmBytePos));
+
+							// build pure positions
+							CCpjFrmBytePos* b;
+							CCpjFrmGroup* g;
+							FVector* v;
+							oF->m_PurePos.Add(iF->numVerts);
+							for (j = 0; j < iF->numVerts; j++)
+							{
+								v = &oF->m_PurePos(j);
+								b = &oF->m_BytePos(j);
+								g = &oF->m_Groups(b->group);
+								v->X = (b->pos[0] * g->scale.X) + g->translate.X;
+								v->Y = (b->pos[1] * g->scale.Y) + g->translate.Y;
+								v->Z = (b->pos[2] * g->scale.Z) + g->translate.Z;
+							}
+
+							// finish up
+							oF->m_BytePos.Empty();
+							oF->m_Groups.Empty();
+							oF->m_isCompressed = FALSE;
+						}
+						else
+						{
+							// vertices
+							oF->m_PurePos.Add(iF->numVerts);
+
+							memcpy(&oF->m_PurePos(0), &fileVertsPure[0], iF->numVerts * sizeof(FVector));
+						}
+						for (j = 0; j < oF->m_PurePos.Num(); ++j)
+							oF->m_PurePos(j) = ToUECoords(oF->m_PurePos(j));
+					}
+				}
+				else debugf(TEXT("UNKNOWN SECTION: %ls Len %i"), DecodeMagic(SubHrd.riffMagic), INT(SubHrd.lenFile));
+			}
+		}
+		return TRUE;
+	}
+	UBOOL LoadChunked(const TCHAR* File, const TCHAR* ChunkID)
+	{
+		FArchive* Ar = GFileManager->CreateFileReader(File, 0, GWarn);
+		if (!Ar)
+			return FALSE;
+
+		UBOOL bResult = LoadFile(*Ar, ChunkID);
+		delete Ar;
+
+		if (bResult)
+		{
+			if (!m_Textures.Num())
+			{
+				CCpjSrfTex* defMat = new(m_Textures) CCpjSrfTex();
+				appStrcpy(defMat->name, TEXT("DefaultTexture"));
+				appStrcpy(defMat->refName, TEXT("DefaultTexture"));
+			}
+			if (IsVertexMesh())
+				CalcBestScaling();
+		}
+		return bResult;
+	}
+public:
+	UBOOL LoadMesh(const TCHAR* File)
+	{
+		CurFile = File;
+		const TCHAR* Str = File;
+		const TCHAR* fStr = NULL;
+		while (*Str)
+		{
+			if (*Str == '\\')
+				fStr = Str;
+			++Str;
+		}
+
+		if (!fStr)
+			return FALSE;
+
+		FString FStr(File, fStr);
+		return LoadChunked(*FStr, (fStr + 1));
+	}
+
+	inline UBOOL IsAnimatedMesh() const
+	{
+		return (Animations.Num() > 0);
+	}
+	inline UBOOL IsVertexMesh() const
+	{
+		return (skm_Bones.Num() == 0);
+	}
+	inline UBOOL HasExportedTex(const TCHAR* Tex)
+	{
+		return ExportedTex.FindItemIndex(Tex) != INDEX_NONE;
+	}
+	inline void ExportTexInfo(const TCHAR* MeshName, FOutputDevice& Ar)
+	{
+		Ar.Log(TEXT("\r\n"));
+		INT i;
+		for (i = 0; i < m_Textures.Num(); ++i)
+		{
+			TCHAR* s = appStrstr(m_Textures(i).name, TEXT(".")); // Strip file extension!
+			if (s)
+				*s = 0;
+			if (!HasExportedTex(m_Textures(i).name))
+			{
+				new (ExportedTex) FString(m_Textures(i).name);
+				Ar.Logf(TEXT("#exec TEXTURE IMPORT NAME=%ls FILE=\"Textures\\%ls.pcx\" GROUP=Skins\r\n"), m_Textures(i).name, m_Textures(i).name);
+			}
+		}
+		for (i = 0; i < m_Textures.Num(); ++i)
+			Ar.Logf(TEXT("#exec MESHMAP SETTEXTURE MESHMAP=%ls NUM=%i TEXTURE=%ls\r\n"), MeshName, i, m_Textures(i).name);
+		Ar.Log(TEXT("\r\n"));
+	}
+
+	void ExportPSK(FArchive& Ar);
+	void ExportPSA(FArchive& Ar);
+
+	void Export3DD(FArchive& Ar);
+	void Export3DA(FArchive& Ar);
+
+	void ExportMeshInfo(const TCHAR* MeshName, FOutputDevice& Ar)
+	{
+		debugf(TEXT("Export UC info..."));
+		Ar.Logf(TEXT("/* ============ %ls ============ */\r\n"), MeshName);
+		INT i;
+
+		if (IsVertexMesh())
+		{
+			Ar.Logf(TEXT("#exec MESH IMPORT MESH=%ls ANIVFILE=\"Models\\%ls_a.3d\" DATAFILE=\"Models\\%ls_d.3d\""), MeshName, MeshName, MeshName);
+			if(IsAnimatedMesh())
+				Ar.Log(TEXT("\r\n"));
+			else Ar.Log(TEXT(" MLOD=0\r\n"));
+			Ar.Logf(TEXT("#exec MESH LODPARAMS MESH=%ls STRENGTH=0.1\r\n\r\n"), MeshName);
+			Ar.Logf(TEXT("#exec MESH ORIGIN MESH=%ls X=%.3f Y=%.3f Z=%.3f YAW=0\r\n"), MeshName, -(VertOrigin.X * VertScaling.X), -(VertOrigin.Y * VertScaling.Y), -(VertOrigin.Z * VertScaling.Z));
+			{
+				INT numFrames = 0;
+				for (i = 0; i < Animations.Num(); ++i)
+					numFrames += Animations(i).m_Frames.Num();
+				numFrames = Max(numFrames, 1);
+				Ar.Logf(TEXT("#exec MESH SEQUENCE MESH=%ls SEQ=All\tSTARTFRAME=0 NUMFRAMES=%i\r\n"), MeshName, numFrames);
+				numFrames = 0;
+				for (i = 0; i < Animations.Num(); ++i)
+				{
+					Ar.Logf(TEXT("#exec MESH SEQUENCE MESH=%ls SEQ=%ls\tSTARTFRAME=%i NUMFRAMES=%i RATE=%g\r\n"), MeshName, *Animations(i).AnimName, numFrames, Animations(i).m_Frames.Num(), Animations(i).m_Rate);
+					numFrames += Animations(i).m_Frames.Num();
+				}
+			}
+			Ar.Logf(TEXT("#exec MESHMAP SCALE MESHMAP=%ls X=%.3f Y=%.3f Z=%.3f\r\n"), MeshName, (1.0 / VertScaling.X), (1.0 / VertScaling.Y), (1.0 / VertScaling.Z));
+			ExportTexInfo(MeshName, Ar);
+		}
+		else
+		{
+			if (IsAnimatedMesh())
+			{
+				{
+					INT numFrames = 0;
+					for (i = 0; i < Animations.Num(); ++i)
+					{
+						numFrames += Animations(i).m_Frames.Num();
+					}
+					Ar.Logf(TEXT("#exec ANIM IMPORT ANIM=%lsAnim ANIMFILE=\"Models\\%ls.psa\" COMPRESS=1 MAXKEYS=%i\r\n\r\n"), MeshName, MeshName, numFrames);
+				}
+				{
+					Ar.Logf(TEXT("#exec ANIM SEQUENCE ANIM=%lsAnim SEQ=All STARTFRAME=0 NUMFRAMES=1 RATE=30 COMPRESS=1.00\r\n"), MeshName);
+					INT Offset = 0;
+					for (INT i = 0; i < Animations.Num(); ++i)
+					{
+						const FAnimSequence& a = Animations(i);
+						Ar.Logf(TEXT("#exec ANIM SEQUENCE ANIM=%lsAnim SEQ=%ls STARTFRAME=%i NUMFRAMES=%i RATE=%g COMPRESS=1.00\r\n"), MeshName, *a.AnimName, Offset, a.m_Frames.Num(), a.m_Rate);
+						Offset += a.m_Frames.Num();
+					}
+					Ar.Logf(TEXT("#exec ANIM DIGEST ANIM=%lsAnim\r\n\r\n"), MeshName);
+				}
+			}
+			Ar.Logf(TEXT("#exec MESH MODELIMPORT MESH=%ls MODELFILE=\"Models\\%ls.psk\"\r\n"), MeshName, MeshName);
+			Ar.Logf(TEXT("#exec MESH LODPARAMS MESH=%ls STRENGTH=0.1\r\n"), MeshName);
+			Ar.Logf(TEXT("#exec MESH ORIGIN MESH=%ls X=0 Y=0 Z=0 YAW=0 PITCH=0 ROLL=0\r\n"), MeshName);
+			Ar.Logf(TEXT("#exec MESHMAP SCALE MESHMAP=%ls X=1.00 Y=1.00 Z=1.00\r\n"), MeshName);
+			Ar.Logf(TEXT("#exec MESH BOUNDINGBOX MESH=%ls XMIN=%g YMIN=%g ZMIN=%g XMAX=%g YMAX=%g ZMAX=%g\r\n"), MeshName, m_Bounds.Min.X, m_Bounds.Min.Y, m_Bounds.Min.Z, m_Bounds.Max.X, m_Bounds.Max.Y, m_Bounds.Max.Z);
+			{
+				FVector Center, Extent;
+				m_Bounds.GetCenterAndExtents(Center, Extent);
+				FLOAT Dist = Extent.Size();
+				Ar.Logf(TEXT("#exec MESH BOUNDINGSPHERE MESH=%ls X=%g Y=%g Z=%g W=%g\r\n"), MeshName, Center.X, Center.Y, Center.Z, Dist);
+			}
+			ExportTexInfo(MeshName, Ar);
+			if (IsAnimatedMesh())
+				Ar.Logf(TEXT("#exec MESH DEFAULTANIM MESH=%ls ANIM=%lsAnim\r\n\r\n"), MeshName, MeshName);
+		}
+	}
+};
+
+struct VVertex
+{
+	_WORD	PointIndex;	 // Index to a point.
+	FLOAT   U, V;         // Scaled to BYTES, rather...-> Done in digestion phase, on-disk size doesn't matter here.
+	BYTE    MatIndex;    // At runtime, this one will be implied by the face that's pointing to us.
+	BYTE    Reserved;    // Top secret.
+};
+struct VTriangle
+{
+	_WORD   WedgeIndex[3];	 // point to three vertices in the vertex list.
+	BYTE    MatIndex;	     // Materials can be anything.
+	BYTE    AuxMatIndex;     // Second material (eg. damage skin, shininess, detail texture / detail mesh...
+	DWORD   SmoothingGroups; // 32-bit flag for smoothing groups AND Lod-bias calculation.
+};
+struct VMaterial
+{
+	ANSICHAR            MaterialName[64];
+	INT					TextureIndex;  // texture index ('multiskin index')
+	DWORD				PolyFlags;     // ALL poly's with THIS material will have this flag.
+	INT				    AuxMaterial;   // reserved: index into another material, eg. detailtexture/shininess/whatever.
+	DWORD				AuxFlags;      // reserved: auxiliary flags 
+	INT					LodBias;       // material-specific lod bias
+	INT					LodStyle;      // material-specific lod style
+};
+struct VJointPos
+{
+	FQuat   	Orientation;  //
+	FVector		Position;     //  needed or not ?
+
+	FLOAT       Length;       //  For collision testing / debugging drawing...
+	FLOAT       XSize;
+	FLOAT       YSize;
+	FLOAT       ZSize;
+
+	friend FArchive& operator<<(FArchive& Ar, VJointPos& V)
+	{
+		return Ar << V.Orientation << V.Position << V.Length << V.XSize << V.YSize << V.ZSize;
+	}
+};
+struct VBone
+{
+	ANSICHAR    Name[64];     //
+	DWORD		Flags;        // reserved / 0x02 = bone where skin is to be attached...	
+	INT 		NumChildren;  // children  // only needed in animation ?
+	INT         ParentIndex;  // 0/NULL if this is the root bone.  
+	VJointPos	BonePos;      // reference position
+
+	friend FArchive& operator<<(FArchive& Ar, VBone& V) // Used for 64-bit compatibility!
+	{
+		Ar.Serialize(&V.Name, sizeof(VBone::Name));
+		return Ar << V.Flags << V.NumChildren << V.ParentIndex << V.BonePos;
+	}
+};
+struct VRawBoneInfluence // just weight, vertex, and Bone, sorted later....
+{
+	FLOAT Weight;
+	INT   PointIndex;
+	INT   BoneIndex;
+};
+
+inline void CopyStringToAnsi(ANSICHAR* Dest, const TCHAR* Src, INT MaxLen)
+{
+	INT i = 0;
+	for (; i < (MaxLen - 1); ++i)
+	{
+		if (!Src[i])
+			break;
+		Dest[i] = ToAnsi(Src[i]);
+	}
+	for (; i < MaxLen; ++i)
+		Dest[i] = 0;
+}
+
+struct VChunkHeader
+{
+	ANSICHAR	ChunkID[20];  // string ID of up to 19 chars (usually zero-terminated)
+	INT			TypeFlag;     // Flags/reserved
+	INT         DataSize;     // size per struct following;
+	INT         DataCount;    // number of structs/
+};
+
+struct FMaterialCache
+{
+private:
+	struct FMatPair
+	{
+		BYTE Flags;
+		FString MatName;
+
+		FMatPair(BYTE f, const TCHAR* mn)
+			: Flags(f), MatName(mn)
+		{}
+	};
+	TArray<FMatPair> Materials;
+	TArray<VMaterial>& OutMat;
+
+public:
+	FMaterialCache(TArray<VMaterial>& M)
+		: OutMat(M)
+	{}
+	inline BYTE GetMaterial(BYTE Flags, const TCHAR* MatName)
+	{
+		for (INT i = 0; i < Materials.Num(); ++i)
+			if (Materials(i).Flags == Flags && Materials(i).MatName == MatName)
+				return i;
+
+		BYTE Ix = OutMat.Num();
+		VMaterial* M = new (OutMat) VMaterial();
+		M->AuxFlags = 0;
+		M->AuxMaterial = 0;
+		M->LodBias = 1;
+		M->LodStyle = 0;
+		CopyStringToAnsi(M->MaterialName, MatName, ARRAY_COUNT(VMaterial::MaterialName));
+		M->TextureIndex = Ix;
+		M->PolyFlags = Flags;
+		new (Materials) FMatPair(Flags, MatName);
+		return Ix;
+	}
+};
+
+#define WriteChunk(Serializer,Struct,VarArray,ChunkName) \
+	Chunk.DataSize = sizeof(Struct); \
+	Chunk.DataCount = VarArray.Num(); \
+	CopyStringToAnsi(Chunk.ChunkID,ChunkName,ARRAY_COUNT(Chunk.ChunkID)); \
+	Serializer.Serialize(&Chunk,sizeof(VChunkHeader)); \
+	if( VarArray.Num() ) \
+		Serializer.Serialize(VarArray.GetData(),sizeof(Struct)*VarArray.Num());
+
+void DnfMesh::ExportPSK(FArchive& Ar)
+{
+	debugf(TEXT("Export PSK..."));
+	CCpjLodLevel* mLod = NULL;
+	if (m_Levels.Num())
+		mLod = &m_Levels(m_Levels.Num() - 1);
+	const INT NumVerts = mLod ? mLod->vertRelay.Num() : m_Verts.Num();
+
+	// Init arrays
+	TArray<FVector> Points(NumVerts);
+	TArray<VVertex> Wedges;
+	TArray<VTriangle> Tris(m_Tris.Num());
+	check(m_Tris.Num() == sm_Tris.Num());
+	TArray<VMaterial> Materials;
+	TArray<VBone> Bones(skm_Bones.Num());
+	TArray<VRawBoneInfluence> Influences;
+
+	// Collect data into arrays.
+	INT i, j;
+	if (NumVerts > m_Verts.Num())
+		warnf(TEXT("Vertex count mismatch Relay %i Geometry %i"), NumVerts, m_Verts.Num());
+	for (i = 0; i < NumVerts; ++i)
+		Points(i) = m_Verts(i).refPosition;
+	{
+		FMaterialCache mCache(Materials);
+		UBOOL bWarnedBounds = FALSE;
+		for (i = 0; i < sm_Tris.Num(); ++i)
+		{
+			VTriangle& V = Tris(i);
+			const CCpjGeoTri& GW = m_Tris(i);
+			const CCpjSrfTri& RW = sm_Tris(i);
+
+			V.AuxMatIndex = 0;
+			V.MatIndex = mCache.GetMaterial(RW.GetMTFlags(), m_Textures.IsValidIndex(RW.texIndex) ? m_Textures(RW.texIndex).name : TEXT("DefaultTexture"));
+			V.SmoothingGroups = RW.smoothGroup;
+			V.WedgeIndex[0] = Wedges.Num();
+			V.WedgeIndex[1] = Wedges.Num() + 1;
+			V.WedgeIndex[2] = Wedges.Num() + 2;
+
+			for (j = 0; j < 3; ++j)
+			{
+				VVertex* W = new (Wedges) VVertex;
+				W->MatIndex = 0;
+				W->PointIndex = GW.edgeRing[j]->tailVertex->iVertex;
+				check(Points.IsValidIndex(W->PointIndex));
+				W->U = m_UV(RW.uvIndex[j]).U;
+				W->V = m_UV(RW.uvIndex[j]).V;
+			}
+		}
+		if (!Materials.Num())
+		{
+			VMaterial* M = new (Materials) VMaterial();
+			M->AuxFlags = 0;
+			M->AuxMaterial = 0;
+			M->LodBias = 1;
+			M->LodStyle = 0;
+			CopyStringToAnsi(M->MaterialName, TEXT("DefaultTexture"), ARRAY_COUNT(VMaterial::MaterialName));
+			M->TextureIndex = 0;
+			M->PolyFlags = 0;
+		}
+	}
+	{
+		if (!Bones.Num())
+		{
+			VBone* B = new (Bones) VBone();
+			B->BonePos.Orientation = FQuat::Identity;
+			B->BonePos.Position = FVector(0, 0, 0);
+			B->Flags = 0;
+			CopyStringToAnsi(B->Name, TEXT("Root"), ARRAY_COUNT(VBone::Name));
+			B->NumChildren = 0;
+			B->ParentIndex = 0;
+		}
+		else
+		{
+			for (i = 0; i < skm_Bones.Num(); ++i)
+			{
+				VBone& B = Bones(i);
+				CCpjSklBone& RB = skm_Bones(i);
+				B.BonePos.Orientation = RB.baseCoords.r;
+				B.BonePos.Position = RB.baseCoords.t;
+				B.Flags = 0;
+				CopyStringToAnsi(B.Name, *RB.name, ARRAY_COUNT(B.Name));
+				INT numCh = 0;
+				for (j = 0; j < skm_Bones.Num(); ++j)
+					if (i != j && skm_Bones(j).parentBone == &RB)
+						++numCh;
+				B.NumChildren = numCh;
+				B.ParentIndex = RB.parentBone ? RB.parentBone->Index : 0;
+			}
+		}
+	}
+	{
+		const CCpjSklVert* iv = &skm_Verts(0);
+		const INT SkmCount = skm_Verts.Num();
+
+		if (mLod)
+		{
+			NWord* lodRelay = &mLod->vertRelay(0);
+			const INT MaxRelay = Min(mLod->vertRelay.Num(), NumVerts);
+			for (i = 0; i < MaxRelay; i++)
+			{
+				if (lodRelay[i] >= SkmCount)
+				{
+					VRawBoneInfluence* inf = new(Influences)VRawBoneInfluence();
+					inf->BoneIndex = 0;
+					inf->PointIndex = i;
+					inf->Weight = 1.f;
+					continue;
+				}
+				const CCpjSklVert& xv = iv[lodRelay[i]];
+				const INT wcount = xv.weights.Num();
+				const CCpjSklWeight* w = &xv.weights(0);
+				if (!wcount)
+				{
+					VRawBoneInfluence* inf = new(Influences)VRawBoneInfluence();
+					inf->BoneIndex = 0;
+					inf->PointIndex = i;
+					inf->Weight = 1.f;
+				}
+				else
+				{
+					for (j = 0; j < wcount; j++)
+					{
+						VRawBoneInfluence* inf = new(Influences)VRawBoneInfluence();
+						inf->BoneIndex = w[j].bone->Index;
+						inf->PointIndex = i;
+						if (wcount == 1)
+							inf->Weight = 1.f;
+						else inf->Weight = w[j].factor;
+					}
+				}
+			}
+		}
+		else
+		{
+			const INT MaxSk = Min(SkmCount, NumVerts);
+			for (i = 0; i < MaxSk; i++)
+			{
+				const CCpjSklVert& xv = iv[i];
+				const INT wcount = xv.weights.Num();
+				const CCpjSklWeight* w = &xv.weights(0);
+				if (!wcount)
+				{
+					VRawBoneInfluence* inf = new(Influences)VRawBoneInfluence();
+					inf->BoneIndex = 0;
+					inf->PointIndex = i;
+					inf->Weight = 1.f;
+				}
+				else
+				{
+					for (j = 0; j < wcount; j++)
+					{
+						VRawBoneInfluence* inf = new(Influences)VRawBoneInfluence();
+						inf->BoneIndex = w[j].bone->Index;
+						inf->PointIndex = i;
+						if (wcount == 1)
+							inf->Weight = 1.f;
+						else inf->Weight = w[j].factor;
+					}
+				}
+			}
+		}
+		for (; i < NumVerts; ++i)
+		{
+			VRawBoneInfluence* inf = new(Influences)VRawBoneInfluence();
+			inf->BoneIndex = 0;
+			inf->PointIndex = i;
+			inf->Weight = 1.f;
+		}
+	}
+
+	// Serialize everything.
+	VChunkHeader Chunk; // Main header.
+	appMemzero(&Chunk, sizeof(VChunkHeader));
+	CopyStringToAnsi(Chunk.ChunkID, TEXT("ACTRHEAD"), ARRAY_COUNT(Chunk.ChunkID));
+	Chunk.TypeFlag = 1999801;
+	Ar.Serialize(&Chunk, sizeof(VChunkHeader));
+
+	// Write PSK specific data.
+	WriteChunk(Ar, FVector, Points, TEXT("PNTS0000")); // Points.
+	WriteChunk(Ar, VVertex, Wedges, TEXT("VTXW0000")); // Wedges.
+	WriteChunk(Ar, VTriangle, Tris, TEXT("FACE0000")); // Faces.
+	WriteChunk(Ar, VMaterial, Materials, TEXT("MATT0000")); // Materials.
+	WriteChunk(Ar, VBone, Bones, TEXT("REFSKELT")); // Bones data.
+	WriteChunk(Ar, VRawBoneInfluence, Influences, TEXT("RAWWEIGHTS")); // Influences.
+}
+
+// Binary bone format to deal with raw animations as generated by various exporters.
+struct FNamedBoneBinary
+{
+	ANSICHAR   Name[64];	// Bone's name
+	DWORD      Flags;		// reserved
+	INT        NumChildren; //
+	INT		   ParentIndex;	// 0/NULL if this is the root bone.  
+	VJointPos  BonePos;	    //
+};
+// Binary animation info format - used to organize raw animation keys into FAnimSeqs on rebuild
+// Similar to MotionChunkDigestInfo..
+struct AnimInfoBinary
+{
+	ANSICHAR Name[64];     // Animation's name
+	ANSICHAR Group[64];    // Animation's group name	
+
+	INT TotalBones;           // TotalBones * NumRawFrames is number of animation keys to digest.
+
+	INT RootInclude;          // 0 none 1 included 		
+	INT KeyCompressionStyle;  // Reserved: variants in tradeoffs for compression.
+	INT KeyQuotum;            // Max key quotum for compression	
+	FLOAT KeyReduction;       // desired 
+	FLOAT TrackTime;            // explicit - can be overridden by the animation rate
+	FLOAT AnimRate;           // frames per second.
+	INT StartBone;            // - Reserved: for partial animations.
+	INT FirstRawFrame;        //
+	INT NumRawFrames;         // NumRawFrames and AnimRate dictate tracktime...
+};
+// An animation key.
+struct VQuatAnimKey
+{
+	FVector		Position;           // relative to parent.
+	FQuat       Orientation;        // relative to parent.
+	FLOAT       Time;				// The duration until the next key (end key wraps to first...)
+};
+
+void DnfMesh::ExportPSA(FArchive& Ar)
+{
+	debugf(TEXT("Export PSA..."));
+	TArray<FNamedBoneBinary> AnimBones(skm_Bones.Num());
+	TArray<AnimInfoBinary> Anims(Animations.Num());
+	TArray<VQuatAnimKey> Keys;
+
+	INT i, j;
+	{
+		for (i = 0; i < skm_Bones.Num(); ++i)
+		{
+			FNamedBoneBinary& B = AnimBones(i);
+			CCpjSklBone& RB = skm_Bones(i);
+			B.BonePos.Orientation = RB.baseCoords.r;
+			B.BonePos.Position = RB.baseCoords.t;
+			B.Flags = 0;
+			CopyStringToAnsi(B.Name, *RB.name, ARRAY_COUNT(B.Name));
+			INT numCh = 0;
+			for (j = 0; j < skm_Bones.Num(); ++j)
+				if (i != j && skm_Bones(j).parentBone == &RB)
+					++numCh;
+			B.NumChildren = numCh;
+			B.ParentIndex = RB.parentBone ? RB.parentBone->Index : 0;
+		}
+	}
+	{
+		INT z,r;
+		INT TotalFrames = 0;
+		TArray<INT> BoneRemaps(skm_Bones.Num());
+		for (i = 0; i < Animations.Num(); ++i)
+		{
+			AnimInfoBinary& A = Anims(i);
+			const FAnimSequence& RA = Animations(i);
+			const INT NumFrames = RA.m_Frames.Num();
+			CopyStringToAnsi(A.Name, *RA.AnimName, ARRAY_COUNT(A.Name));
+			CopyStringToAnsi(A.Group, TEXT(""), ARRAY_COUNT(A.Name));
+			A.TotalBones = skm_Bones.Num() * NumFrames;
+			A.RootInclude = 1;
+			A.KeyCompressionStyle = 0;
+			A.KeyQuotum = 0;
+			A.KeyReduction = 0.f;
+			A.TrackTime = FLOAT(NumFrames);
+			A.AnimRate = 1.f;
+			A.StartBone = 0;
+			A.FirstRawFrame = TotalFrames;
+			A.NumRawFrames = NumFrames;
+			TotalFrames += NumFrames;
+
+			for (j = 0; j < BoneRemaps.Num(); ++j)
+				BoneRemaps(j) = INDEX_NONE;
+			for (j = 0; j < RA.m_BoneInfo.Num(); ++j)
+			{
+				const CCpjSeqBoneInfo& B = RA.m_BoneInfo(j);
+				for (z = 0; z < skm_Bones.Num(); ++z)
+					if (skm_Bones(z).name == B.name)
+					{
+						BoneRemaps(z) = j;
+						break;
+					}
+			}
+
+			INT iBase = Keys.Add(skm_Bones.Num() * NumFrames);
+			for (z = 0; z < skm_Bones.Num(); ++z)
+			{
+				const CCpjSklBone& RB = skm_Bones(z);
+				const FQuat* LastRot = &RB.baseCoords.r;
+				const FVector* LastPos = &RB.baseCoords.t;
+				r = BoneRemaps(z);
+				VQuatAnimKey* Q = &Keys(iBase + z);
+
+				for (j = 0; j < NumFrames; ++j)
+				{
+					const CCpjSeqFrame& F = RA.m_Frames(j);
+					if (F.rotates.IsValidIndex(r))
+						LastRot = &F.rotates(r).quat;
+					if (F.translates.IsValidIndex(r))
+						LastPos = &F.translates(r).translate;
+					Q->Orientation = *LastRot;
+					Q->Position = *LastPos;
+					Q->Time = FLOAT(j);
+					Q += skm_Bones.Num();
+				}
+			}
+		}
+	}
+
+	// Serialize everything.
+	VChunkHeader Chunk; // Main header.
+	appMemzero(&Chunk, sizeof(VChunkHeader));
+	CopyStringToAnsi(Chunk.ChunkID, TEXT("ANIMHEAD"), ARRAY_COUNT(Chunk.ChunkID));
+	Chunk.TypeFlag = 1999801;
+	Ar.Serialize(&Chunk, sizeof(VChunkHeader));
+
+	// Write PSA specific data.
+	WriteChunk(Ar, FNamedBoneBinary, AnimBones, TEXT("BONENAMES")); // Bones.
+	WriteChunk(Ar, AnimInfoBinary, Anims, TEXT("ANIMINFO")); // Anims.
+	WriteChunk(Ar, VQuatAnimKey, Keys, TEXT("ANIMKEYS")); // Raw keys.
+
+	// Unused, but in for compatibility.
+	CopyStringToAnsi(Chunk.ChunkID, TEXT("SCALEKEYS"), ARRAY_COUNT(Chunk.ChunkID));
+	Chunk.DataCount = 0;
+	Chunk.DataSize = 0;
+	Ar.Serialize(&Chunk, sizeof(VChunkHeader));
+}
+
+// James mesh info.
+struct FJSDataHeader
+{
+	_WORD	NumPolys;
+	_WORD	NumVertices;
+	_WORD	BogusRot;
+	_WORD	BogusFrame;
+	DWORD	BogusNormX, BogusNormY, BogusNormZ;
+	DWORD	FixScale;
+	DWORD	Unused1, Unused2, Unused3;
+};
+
+struct FMeshUV
+{
+	BYTE U;
+	BYTE V;
+
+	inline void Set(const FUVMap& UV)
+	{
+		U = appRound(UV.U * 255.f);
+		V = appRound(UV.V * 255.f);
+	}
+};
+
+// Mesh triangle.
+struct FJSMeshTri
+{
+	_WORD		iVertex[3];		// Vertex indices.
+	BYTE		Type;			// James' mesh type.
+	BYTE		Color;			// Color for flat and Gouraud shaded.
+	FMeshUV		Tex[3];			// Texture UV coordinates.
+	BYTE		TextureNum;		// Source texture offset.
+	BYTE		Flags;			// Unreal mesh flags (currently unused).
+};
+
+void DnfMesh::Export3DD(FArchive& Ar)
+{
+	debugf(TEXT("Export d_3d..."));
+
+	INT i, j;
+	CCpjLodLevel* mLod = NULL;
+	if (m_Levels.Num())
+		mLod = &m_Levels(m_Levels.Num() - 1);
+	const INT NumVerts = mLod ? mLod->vertRelay.Num() : m_Verts.Num();
+	const INT NumPolies = mLod ? mLod->triangles.Num() : m_Tris.Num();
+	check(m_Tris.Num() == sm_Tris.Num());
+
+	{
+		// Write mesh header data.
+		FJSDataHeader	JSDataHdr;
+		appMemzero(&JSDataHdr, sizeof(FJSDataHeader));
+		JSDataHdr.NumVertices = NumVerts;
+		JSDataHdr.NumPolys = NumPolies;
+		Ar.Serialize(&JSDataHdr, sizeof(FJSDataHeader));
+	}
+	{
+		// Write dummy bits
+		BYTE Dummy[12];
+		appMemzero(Dummy, sizeof(Dummy));
+		Ar.Serialize(&Dummy[0], sizeof(Dummy));
+	}
+
+	// Write mesh triangles.
+	FJSMeshTri Tri;
+	UBOOL bWarnedBounds = FALSE;
+	if (mLod)
+	{
+		for (i = 0; i < NumPolies; i++)
+		{
+			const CCpjLodTri& GW = mLod->triangles(i);
+			const CCpjSrfTri& RW = sm_Tris(GW.srfTriIndex);
+
+			for (j = 0; j < 3; ++j)
+			{
+				Tri.iVertex[j] = GW.vertIndex[j];
+				Tri.Tex[j].Set(m_UV(GW.uvIndex[j]));
+			}
+			Tri.TextureNum = RW.texIndex;
+			if (Tri.TextureNum >= m_Textures.Num())
+			{
+				if (!bWarnedBounds)
+				{
+					warnf(TEXT("Texture Index out of bounds %i/%i"), INT(Tri.TextureNum), m_Textures.Num());
+					bWarnedBounds = TRUE;
+				}
+				Tri.TextureNum = 0;
+			}
+			Tri.Type = RW.GetMTFlags();
+			Ar.Serialize(&Tri, sizeof(FJSMeshTri));
+		}
+	}
+	else
+	{
+		for (i = 0; i < sm_Tris.Num(); i++)
+		{
+			const CCpjGeoTri& GW = m_Tris(i);
+			const CCpjSrfTri& RW = sm_Tris(i);
+
+			for (j = 0; j < 3; ++j)
+			{
+				Tri.iVertex[j] = GW.edgeRing[j]->tailVertex->iVertex;
+				Tri.Tex[j].Set(m_UV(RW.uvIndex[j]));
+			}
+			Tri.TextureNum = RW.texIndex;
+			if (Tri.TextureNum >= m_Textures.Num())
+			{
+				if (!bWarnedBounds)
+				{
+					warnf(TEXT("Texture Index out of bounds %i/%i"), INT(Tri.TextureNum), m_Textures.Num());
+					bWarnedBounds = TRUE;
+				}
+				Tri.TextureNum = 0;
+			}
+			Tri.Type = 0;
+			Ar.Serialize(&Tri, sizeof(FJSMeshTri));
+		}
+	}
+}
+
+// James animation info.
+struct FJSAnivHeader
+{
+	_WORD	NumFrames;		// Number of animation frames.
+	_WORD	FrameSize;		// Size of one frame of animation.
+};
+
+// Packed mesh vertex point for skinned meshes.
+#define GET_MESHVERT_DWORD(mv) (*(DWORD*)&(mv))
+struct FMeshVert
+{
+	INT X : 11; INT Y : 11; INT Z : 10;
+
+	// Constructor.
+	FMeshVert()
+	{}
+	FMeshVert(const FVector& In)
+		: X(Clamp(appRound(In.X), -1023, 1023)), Y(Clamp(appRound(In.Y), -1023, 1023)), Z(Clamp(appRound(In.Z), -511, 511))
+	{}
+
+	// Functions.
+	FVector Vector() const
+	{
+		return FVector(X, Y, Z);
+	}
+};
+
+void DnfMesh::Export3DA(FArchive& Ar)
+{
+	debugf(TEXT("Export a_3d..."));
+
+	CCpjLodLevel* mLod = NULL;
+	if (m_Levels.Num())
+		mLod = &m_Levels(m_Levels.Num() - 1);
+	const INT NumVerts = mLod ? mLod->vertRelay.Num() : m_Verts.Num();
+	INT i;
+
+	INT NumFrames = 0;
+	if (Animations.Num())
+	{
+		for (i = 0; i < Animations.Num(); ++i)
+		{
+			NumFrames += Animations(i).m_Frames.Num();
+		}
+	}
+	else
+	{
+		NumFrames = 1;
+	}
+	{
+		// Write animation header data.
+		FJSAnivHeader JSAnivHdr;
+		JSAnivHdr.NumFrames = (_WORD)NumFrames;
+		JSAnivHdr.FrameSize = (_WORD)(NumVerts * sizeof(FMeshVert));
+		Ar.Serialize(&JSAnivHdr, sizeof(FJSAnivHeader));
+	}
+	{
+		// Build complete set of animation frames...
+		TArray<FMeshVert> FrameVerts(NumFrames * NumVerts);
+		FMeshVert* Out = &FrameVerts(0);
+		NWord* relay = mLod ? &mLod->vertRelay(0) : nullptr;
+		INT j,z;
+		if (Animations.Num())
+		{
+			for (i = 0; i < Animations.Num(); ++i)
+			{
+				const INT Count = Animations(i).m_Frames.Num();
+				const CCpjSeqFrame* gf = &Animations(i).m_Frames(0);
+				for (j = 0; j < Count; ++j)
+				{
+					const CCpjFrmFrame* Fr = FindFrame(*gf[j].vertFrameName);
+					if (!Fr)
+					{
+						warnf(TEXT("Failed to find frame '%ls'!"), *gf[j].vertFrameName);
+					}
+					else if (relay)
+					{
+						const FVector* gPure = &Fr->m_PurePos(0);
+						for (z = 0; z < NumVerts; ++z)
+						{
+							*Out = FMeshVert(PreMulti(gPure[relay[z]]));
+							++Out;
+						}
+					}
+					else
+					{
+						const FVector* gPure = &Fr->m_PurePos(0);
+						for (z = 0; z < NumVerts; ++z)
+						{
+							*Out = FMeshVert(PreMulti(gPure[z]));
+							++Out;
+						}
+					}
+				}
+			}
+		}
+		else if (relay)
+		{
+			const CCpjGeoVert* iv = &m_Verts(0);
+			for (i = 0; i < NumVerts; ++i)
+			{
+				*Out = FMeshVert(PreMulti(iv[relay[i]].refPosition));
+			}
+		}
+		else
+		{
+			const CCpjGeoVert* iv = &m_Verts(0);
+			for (i = 0; i < NumVerts; ++i)
+			{
+				*Out = FMeshVert(PreMulti(iv[i].refPosition));
+			}
+		}
+		Ar.Serialize(&FrameVerts(0), sizeof(FMeshVert) * FrameVerts.Num());
+	}
+}
