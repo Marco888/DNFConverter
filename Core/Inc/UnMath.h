@@ -553,6 +553,10 @@ public:
 	{
 		return FVector( X * V.X, Y * V.Y, Z * V.Z );
 	}
+	FORCEINLINE FVector operator/(const FVector& V) const
+	{
+		return FVector(X / V.X, Y / V.Y, Z / V.Z);
+	}
 
 	// Binary comparison operators.
 	UBOOL operator==( const FVector& V ) const
@@ -759,6 +763,26 @@ public:
 	friend FArchive& operator<<( FArchive& Ar, FVector& V )
 	{
 		return Ar << V.X << V.Y << V.Z;
+	}
+
+	// DNF:
+	FORCEINLINE operator float* () { return((float*)this); }
+	FORCEINLINE operator float* () const { return((float*)this); }
+
+	FORCEINLINE int Dominant() const
+	{
+		int d(0);
+		if (Abs(Y) > Abs(X))
+			d = 1;
+		if (Abs(Z) > Abs((*this)[d]))
+			d = 2;
+		return d;
+	}
+	FORCEINLINE friend FVector operator ~ (const FVector& inV) // arbitrary perpendicular
+	{
+		FVector a(0, 0, 0);
+		a[(inV.Dominant() + 1) % 3] = 1.f;
+		return(a ^ inV);
 	}
 };
 

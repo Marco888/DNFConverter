@@ -393,7 +393,7 @@ public:
 			for (INT i = 0; i < Summary.ExportCount; i++)
 			{
 				debugfSlow(TEXT("Export[%i] %ls Class %ls"), i, *ExportMap(i).ObjectName, *GetExportClassName(ExportMap(i).ClassIndex));
-				if (GetExportClassName(ExportMap(i).ClassIndex) == NAME_DukeMesh)
+				if (GetExportClassName(ExportMap(i).ClassIndex) == NAME_DukeMesh /* && !appStricmp(*ExportMap(i).ObjectName, TEXT("alien_Adultsnatcher"))*/)
 				{
 					FileAr->Seek(ExportMap(i).SerialOffset);
 					DM.Serialize(*this);

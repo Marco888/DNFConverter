@@ -1127,6 +1127,18 @@ FString ParseToken( const TCHAR*& Str, UBOOL UseEscape )
 		return TEXT("");
 }
 
+FLOAT ParseNextFloat(const TCHAR** Stream)
+{
+	const TCHAR* S = *Stream;
+	while (*S == ' ')
+		++S;
+	FLOAT Result = appAtof(S);
+	while (*S && *S != ' ')
+		++S;
+	*Stream = S;
+	return Result;
+}
+
 //
 // Get a line of Stream (everything up to, but not including, CR/LF.
 // Returns 0 if ok, nonzero if at end of stream and returned 0-length string.

@@ -492,6 +492,8 @@ FString ParseToken( const TCHAR*& Str, UBOOL UseEscape );
 void ParseNext( const TCHAR** Stream );
 UBOOL ParseParam( const TCHAR* Stream, const TCHAR* Param );
 
+FLOAT ParseNextFloat(const TCHAR** Stream);
+
 /*-----------------------------------------------------------------------------
 	Array functions.
 -----------------------------------------------------------------------------*/
