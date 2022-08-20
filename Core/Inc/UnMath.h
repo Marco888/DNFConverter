@@ -18,6 +18,7 @@ class  FScale;
 class  FGlobalMath;
 class  FMatrix;
 class  FQuat;
+class  FCoords;
 
 // Constants.
 #undef  PI
@@ -784,6 +785,11 @@ public:
 		a[(inV.Dominant() + 1) % 3] = 1.f;
 		return(a ^ inV);
 	}
+
+	// Transformation.
+	inline FVector TransformVectorBy(const FCoords& Coords) const;
+	inline FVector TransformPointBy(const FCoords& Coords) const;
+	inline FVector PivotTransform(const FCoords& Coords) const;
 };
 
 
@@ -1181,6 +1187,11 @@ public:
 		Rot.Yaw		= Rot.Yaw & 0xFFFF;
 		Rot.Roll	= Rot.Roll & 0xFFFF;
 		return Rot;
+	}
+
+	inline void SetAngDiff(const FRotator& Other)
+	{
+		*this = (Other - *this).Normalize();
 	}
 
 	void MakeShortestRoute();
@@ -2305,7 +2316,8 @@ public:
 	:	X(InX), Y(InY), Z(InZ), W(InA)
 	{}
 
-	FQuat( const FMatrix& M );	
+	FQuat( const FMatrix& M );
+	FQuat(const FCoords& C);
 
 	// Assumes Axis is normalised.
 	FQuat( FVector Axis, FLOAT Angle )
@@ -2463,6 +2475,11 @@ public:
 	// Exp should really only be used after Log.
 	FQuat Log();
 	FQuat Exp();
+
+	inline UBOOL IsZero() const
+	{
+		return (Abs(X) < DELTA) && (Abs(Y) < DELTA) && (Abs(Z) < DELTA) && (Abs(W) < DELTA);
+	}
 };
 
 // Generate the 'smallest' (geodesic) rotation between these two vectors.
@@ -2475,7 +2492,7 @@ inline FLOAT FQuatDot(const FQuat& Q1,const FQuat& Q2)
 };
 
 // Error measure (angle) between two quaternions, ranged [0..1]
-inline FLOAT FQuatError(FQuat& Q1,FQuat& Q2)
+inline FLOAT FQuatError(const FQuat& Q1, const FQuat& Q2)
 {
 	// Returns the hypersphere-angle between two quaternions; alignment shouldn't matter, though 
 	// normalized input is expected.
@@ -2698,129 +2715,6 @@ public:
 	{
 		FMatrix	Result;
 
-#if ASM
-		__asm
-		{
-		mov		eax,[Other]
-		mov		ecx,[this]
-	
-		movups	xmm4,[eax]				// Other.M[0][0-3]
-		movups	xmm5,[eax+16]			// Other.M[1][0-3]
-		movups	xmm6,[eax+32]			// Other.M[2][0-3]
-		movups	xmm7,[eax+48]			// Other.M[3][0-3]
-
-		lea		eax,[Result]
-
-		// Begin first row of result.
-		movss	xmm0,[ecx]				// M[0][0] 
-		shufps	xmm0,xmm0,0
-		mulps	xmm0,xmm4
-
-		movss	xmm1,[ecx+4]			// M[0][1]
-		shufps	xmm1,xmm1,0
-		mulps	xmm1,xmm5
-
-		movss	xmm2,[ecx+8]			// M[0][2]
-		shufps	xmm2,xmm2,0
-		mulps	xmm2,xmm6
-
-		addps	xmm1,xmm0				// First row done with xmm0
-
-		movss	xmm3,[ecx+12]			// M[0][3]
-		shufps	xmm3,xmm3,0
-		mulps	xmm3,xmm7
-		
-		// Begin second row of result.
-		movss	xmm0,[ecx+16]			// M[1][0] 
-		shufps	xmm0,xmm0,0
-		mulps	xmm0,xmm4
-	
-		addps	xmm3,xmm2				// First row done with xmm2
-		
-		movss	xmm2,[ecx+20]			// M[1][1]
-		shufps	xmm2,xmm2,0
-		mulps	xmm2,xmm5
-
-		addps	xmm3,xmm1				// First row done with xmm1
-	
-		movss	xmm1,[ecx+24]			// M[1][2]
-		shufps	xmm1,xmm1,0
-		mulps	xmm1,xmm6
-
-		movups	[eax],xmm3				// Store Result.M[0][0-3]
-		// Done computing first row.
-		
-		addps	xmm2,xmm0				// Second row done with xmm0
-
-		movss	xmm3,[ecx+28]			// M[1][3]
-		shufps	xmm3,xmm3,0
-		mulps	xmm3,xmm7
-		
-		// Begin third row of result.
-		movss	xmm0,[ecx+32]			// M[2][0] 
-		shufps	xmm0,xmm0,0
-		mulps	xmm0,xmm4
-	
-		addps	xmm3,xmm1				// Second row done with xmm1
-		
-		movss	xmm1,[ecx+36]			// M[2][1]
-		shufps	xmm1,xmm1,0
-		mulps	xmm1,xmm5
-
-		addps	xmm3,xmm2				// Second row done with xmm2
-
-		movss	xmm2,[ecx+40]			// M[2][2]
-		shufps	xmm2,xmm2,0
-		mulps	xmm2,xmm6
-
-		movups	[eax+16],xmm3			// Store Result.M[1][0-3]
-		// Done computing second row.
-
-		addps	xmm1,xmm0				// Third row done with xmm0
-
-		movss	xmm3,[ecx+44]			// M[2][3]
-		shufps	xmm3,xmm3,0
-		mulps	xmm3,xmm7
-		
-		// Begin fourth row of result.
-		movss	xmm0,[ecx+48]			// M[3][0]
-		shufps	xmm0,xmm0,0
-		mulps	xmm0,xmm4
-	
-		addps	xmm3,xmm2				// Third row done with xmm2
-		
-		movss	xmm2,[ecx+52]			// M[3][1]
-		shufps	xmm2,xmm2,0
-		mulps	xmm2,xmm5
-
-		addps	xmm3,xmm1				// Third row done with xmm1
-		
-		movss	xmm1,[ecx+56]			// M[3][2]
-		shufps	xmm1,xmm1,0
-		mulps	xmm1,xmm6
-
-		movups	[eax+32],xmm3			// Store Result.M[2][0-3]
-		// Done computing third row.
-
-		addps	xmm2,xmm0
-
-		movss	xmm3,[ecx+60]			// M[3][3]
-		shufps	xmm3,xmm3,0
-		mulps	xmm3,xmm7
-		
-		// stall
-	
-		addps	xmm3,xmm1
-		
-		// stall
-
-		addps	xmm3,xmm2
-	
-		movups	[eax+48],xmm3			// Store Result.M[3][0-3]
-		// Done computing fourth row.
-		}
-#else
-
 		Result.M[0][0] = M[0][0] * Other.M[0][0] + M[0][1] * Other.M[1][0] + M[0][2] * Other.M[2][0] + M[0][3] * Other.M[3][0];
 		Result.M[0][1] = M[0][0] * Other.M[0][1] + M[0][1] * Other.M[1][1] + M[0][2] * Other.M[2][1] + M[0][3] * Other.M[3][1];
 		Result.M[0][2] = M[0][0] * Other.M[0][2] + M[0][1] * Other.M[1][2] + M[0][2] * Other.M[2][2] + M[0][3] * Other.M[3][2];
@@ -2840,9 +2734,6 @@ public:
 		Result.M[3][1] = M[3][0] * Other.M[0][1] + M[3][1] * Other.M[1][1] + M[3][2] * Other.M[2][1] + M[3][3] * Other.M[3][1];
 		Result.M[3][2] = M[3][0] * Other.M[0][2] + M[3][1] * Other.M[1][2] + M[3][2] * Other.M[2][2] + M[3][3] * Other.M[3][2];
 		Result.M[3][3] = M[3][0] * Other.M[0][3] + M[3][1] * Other.M[1][3] + M[3][2] * Other.M[2][3] + M[3][3] * Other.M[3][3];
-
-#endif
-
 		return Result;
 	}
 
@@ -3016,52 +2907,10 @@ public:
 	{
 		FPlane Result;
 
-#if ASM
-		__asm
-		{
-			mov		eax,[P]
-			mov		ecx,[this]
-			
-			movups	xmm4,[ecx]			// M[0][0]
-			movups	xmm5,[ecx+16]		// M[1][0]
-			movups	xmm6,[ecx+32]		// M[2][0]
-			movups	xmm7,[ecx+48]		// M[3][0]
-
-			movss	xmm0,[eax]FVector.X
-			shufps	xmm0,xmm0,0
-			mulps	xmm0,xmm4
-
-			movss	xmm1,[eax]FVector.Y
-			shufps	xmm1,xmm1,0
-			mulps	xmm1,xmm5
-
-			movss	xmm2,[eax]FVector.Z
-			shufps	xmm2,xmm2,0
-			mulps	xmm2,xmm6
-
-			addps	xmm0,xmm1
-
-			movss	xmm3,[eax]FPlane.W
-			shufps	xmm3,xmm3,0
-			mulps	xmm3,xmm7
-			
-			// stall
-			lea		eax,[Result]
-
-			addps	xmm2,xmm3
-			
-			// stall
-
-			addps	xmm0,xmm2
-		
-			movups	[eax],xmm0
-		}
-#else
 		Result.X = P.X * M[0][0] + P.Y * M[1][0] + P.Z * M[2][0] + P.W * M[3][0];
 		Result.Y = P.X * M[0][1] + P.Y * M[1][1] + P.Z * M[2][1] + P.W * M[3][1];
 		Result.Z = P.X * M[0][2] + P.Y * M[1][2] + P.Z * M[2][2] + P.W * M[3][2];
 		Result.W = P.X * M[0][3] + P.Y * M[1][3] + P.Z * M[2][3] + P.W * M[3][3];
-#endif
 
 		return Result;
 	}
@@ -3070,7 +2919,13 @@ public:
 
 	FORCEINLINE FVector TransformFVector(const FVector &V) const
 	{
-		return TransformFPlane(FPlane(V.X,V.Y,V.Z,1.0f));
+		FVector Result;
+
+		Result.X = V.X * M[0][0] + V.Y * M[1][0] + V.Z * M[2][0] + M[3][0];
+		Result.Y = V.X * M[0][1] + V.Y * M[1][1] + V.Z * M[2][1] + M[3][1];
+		Result.Z = V.X * M[0][2] + V.Y * M[1][2] + V.Z * M[2][2] + M[3][2];
+
+		return Result;
 	}
 
 	FORCEINLINE FVector InverseTransformFVector(const FVector &V) const
@@ -3090,9 +2945,15 @@ public:
 
 	// Normal transform.
 
-	FORCEINLINE FPlane TransformNormal(const FVector& V) const
+	FORCEINLINE FVector TransformNormal(const FVector& V) const
 	{
-		return TransformFPlane(FPlane(V.X,V.Y,V.Z,0.0f));
+		FVector Result;
+
+		Result.X = V.X * M[0][0] + V.Y * M[1][0] + V.Z * M[2][0];
+		Result.Y = V.X * M[0][1] + V.Y * M[1][1] + V.Z * M[2][1];
+		Result.Z = V.X * M[0][2] + V.Y * M[1][2] + V.Z * M[2][2];
+
+		return Result;
 	}
 
 	FORCEINLINE FVector InverseTransformNormal(const FVector &V) const
@@ -3108,7 +2969,7 @@ public:
 
 	// Transpose.
 
-	FORCEINLINE FMatrix Transpose()
+	FORCEINLINE FMatrix Transpose() const
 	{
 		FMatrix	Result;
 
@@ -3425,16 +3286,6 @@ public:
 			OutPlane
 			);
 	}
-
-	// Serializer.
-	friend FArchive& operator<<(FArchive& Ar,FMatrix& M)
-	{
-		return Ar << 
-			M.M[0][0] << M.M[0][1] << M.M[0][2] << M.M[0][3] << 
-			M.M[1][0] << M.M[1][1] << M.M[1][2] << M.M[1][3] << 
-			M.M[2][0] << M.M[2][1] << M.M[2][2] << M.M[2][3] << 
-			M.M[3][0] << M.M[3][1] << M.M[3][2] << M.M[3][3];
-	}
 };
 
 // Matrix operations.
@@ -3599,6 +3450,309 @@ public:
 	{
 	}
 };
+
+class FCoords
+{
+public:
+	static const FCoords UnitCoords;
+
+	FVector	Origin;
+	FVector	XAxis;
+	FVector YAxis;
+	FVector ZAxis;
+
+	// Constructors.
+	FCoords() {}
+	FCoords(const FVector& InOrigin)
+		: Origin(InOrigin), XAxis(1, 0, 0), YAxis(0, 1, 0), ZAxis(0, 0, 1) {}
+	FCoords(const FVector& InOrigin, const FVector& InX, const FVector& InY, const FVector& InZ)
+		: Origin(InOrigin), XAxis(InX), YAxis(InY), ZAxis(InZ) {}
+	FCoords(const FVector& Org, const FQuat& Q)
+		: Origin(Org)
+	{
+		FLOAT wx, wy, wz, xx, yy, yz, xy, xz, zz, x2, y2, z2;
+
+		x2 = Q.X + Q.X;  y2 = Q.Y + Q.Y;  z2 = Q.Z + Q.Z;
+		xx = Q.X * x2;   xy = Q.X * y2;   xz = Q.X * z2;
+		yy = Q.Y * y2;   yz = Q.Y * z2;   zz = Q.Z * z2;
+		wx = Q.W * x2;   wy = Q.W * y2;   wz = Q.W * z2;
+
+		XAxis = FVector(1.0f - (yy + zz), xy - wz, xz + wy);
+		YAxis = FVector(xy + wz, 1.0f - (xx + zz), yz - wx);
+		ZAxis = FVector(xz - wy, yz + wx, 1.0f - (xx + yy));
+	}
+
+	// Functions.
+	inline FCoords MirrorByVector(const FVector& MirrorNormal) const
+	{
+		return FCoords
+		(
+			Origin.MirrorByVector(MirrorNormal),
+			XAxis.MirrorByVector(MirrorNormal),
+			YAxis.MirrorByVector(MirrorNormal),
+			ZAxis.MirrorByVector(MirrorNormal)
+		);
+	}
+	inline FCoords MirrorByPlane(const FPlane& MirrorPlane) const
+	{
+		return FCoords
+		(
+			Origin.MirrorByPlane(MirrorPlane),
+			XAxis.MirrorByVector(MirrorPlane),
+			YAxis.MirrorByVector(MirrorPlane),
+			ZAxis.MirrorByVector(MirrorPlane)
+		);
+	}
+	inline FCoords	Transpose() const
+	{
+		return FCoords
+		(
+			-Origin.TransformVectorBy(*this),
+			FVector(XAxis.X, YAxis.X, ZAxis.X),
+			FVector(XAxis.Y, YAxis.Y, ZAxis.Y),
+			FVector(XAxis.Z, YAxis.Z, ZAxis.Z)
+		);
+	}
+	inline FCoords Inverse() const
+	{
+		FLOAT RDet = 1.f / FTriple(XAxis, YAxis, ZAxis);
+		return FCoords
+		(-Origin.TransformVectorBy(*this)
+			, RDet * FVector
+			((YAxis.Y * ZAxis.Z - YAxis.Z * ZAxis.Y)
+				, (ZAxis.Y * XAxis.Z - ZAxis.Z * XAxis.Y)
+				, (XAxis.Y * YAxis.Z - XAxis.Z * YAxis.Y))
+			, RDet * FVector
+			((YAxis.Z * ZAxis.X - ZAxis.Z * YAxis.X)
+				, (ZAxis.Z * XAxis.X - XAxis.Z * ZAxis.X)
+				, (XAxis.Z * YAxis.X - XAxis.X * YAxis.Z))
+			, RDet * FVector
+			((YAxis.X * ZAxis.Y - YAxis.Y * ZAxis.X)
+				, (ZAxis.X * XAxis.Y - ZAxis.Y * XAxis.X)
+				, (XAxis.X * YAxis.Y - XAxis.Y * YAxis.X))
+		);
+	}
+	inline FCoords PivotInverse() const
+	{
+		FCoords Temp;
+		FLOAT RDet = 1.f / FTriple(XAxis, YAxis, ZAxis);
+
+		Temp.XAxis = RDet * FVector
+		((YAxis.Y * ZAxis.Z - YAxis.Z * ZAxis.Y)
+			, (ZAxis.Y * XAxis.Z - ZAxis.Z * XAxis.Y)
+			, (XAxis.Y * YAxis.Z - XAxis.Z * YAxis.Y));
+
+		Temp.YAxis = RDet * FVector
+		((YAxis.Z * ZAxis.X - ZAxis.Z * YAxis.X)
+			, (ZAxis.Z * XAxis.X - XAxis.Z * ZAxis.X)
+			, (XAxis.Z * YAxis.X - XAxis.X * YAxis.Z));
+
+		Temp.ZAxis = RDet * FVector
+		((YAxis.X * ZAxis.Y - YAxis.Y * ZAxis.X)
+			, (ZAxis.X * XAxis.Y - ZAxis.Y * XAxis.X)
+			, (XAxis.X * YAxis.Y - XAxis.Y * YAxis.X));
+
+		FVector TOrigin = -Origin;
+		Temp.Origin = TOrigin.TransformVectorBy(Temp);
+		return Temp;
+	}
+	inline FCoords ApplyPivot(const FCoords& CoordsB) const
+	{
+		// Fast solution assuming orthogonal coordinate system
+		FCoords Temp;
+		Temp.Origin = CoordsB.Origin + Origin.TransformVectorBy(CoordsB);
+		Temp.XAxis = CoordsB.XAxis.TransformVectorBy(*this);
+		Temp.YAxis = CoordsB.YAxis.TransformVectorBy(*this);
+		Temp.ZAxis = CoordsB.ZAxis.TransformVectorBy(*this);
+		return Temp;
+	}
+	inline FRotator OrthoRotation() const
+	{
+		constexpr DOUBLE Factor = 32768.0 / PI;
+		FRotator R
+		(
+			(INT)(appAtan2(XAxis.Z, XAxis.Size2D()) * Factor),
+			(INT)(appAtan2(XAxis.Y, XAxis.X) * Factor),
+			0
+		);
+		FCoords S = UnitCoords / R;
+		R.Roll = (INT)(appAtan2(ZAxis | S.YAxis, YAxis | S.YAxis) * Factor);
+		return R;
+	}
+
+	// Operators.
+	inline FCoords& operator*=	(const FCoords& TransformCoords)
+	{
+		//!! Proper solution:
+		//Origin = Origin.TransformPointBy( TransformCoords.Inverse().Transpose() );
+		// Fast solution assuming orthogonal coordinate system:
+		Origin = Origin.TransformPointBy(TransformCoords);
+		XAxis = XAxis.TransformVectorBy(TransformCoords);
+		YAxis = YAxis.TransformVectorBy(TransformCoords);
+		ZAxis = ZAxis.TransformVectorBy(TransformCoords);
+		return *this;
+	}
+	inline FCoords	 operator*	(const FCoords& TransformCoords) const
+	{
+		return FCoords(*this) *= TransformCoords;
+	}
+	inline FCoords& operator*=	(const FVector& Point)
+	{
+		Origin -= Point;
+		return *this;
+	}
+	inline FCoords  operator*	(const FVector& Point) const
+	{
+		return FCoords(*this) *= Point;
+	}
+	inline FCoords& operator*=	(const FRotator& Rot)
+	{
+		FLOAT	SR = GMath.SinTab(Rot.Roll),
+			SP = GMath.SinTab(Rot.Pitch),
+			SY = GMath.SinTab(Rot.Yaw),
+			CR = GMath.CosTab(Rot.Roll),
+			CP = GMath.CosTab(Rot.Pitch),
+			CY = GMath.CosTab(Rot.Yaw);
+
+		*this *= FCoords(FVector(0, 0, 0),
+			FVector(CP * CY, CP * SY, SP),
+			FVector(SR * SP * CY - CR * SY, SR * SP * SY + CR * CY, -SR * CP),
+			FVector(-(CR * SP * CY + SR * SY), CY * SR - CR * SP * SY, CR * CP));
+		return *this;
+	}
+	inline FCoords  operator*	(const FRotator& Rot) const
+	{
+		return FCoords(*this) *= Rot;
+	}
+	//FCoords& operator*=	(const FScale& Scale);
+	//FCoords  operator*	(const FScale& Scale) const;
+	inline FCoords& operator/=	(const FVector& Point)
+	{
+		Origin += Point;
+		return *this;
+	}
+	inline FCoords  operator/	(const FVector& Point) const
+	{
+		return FCoords(*this) /= Point;
+	}
+	inline FCoords& operator/=	(const FRotator& Rot)
+	{
+		FLOAT	SR = GMath.SinTab(Rot.Roll),
+			SP = GMath.SinTab(Rot.Pitch),
+			SY = GMath.SinTab(Rot.Yaw),
+			CR = GMath.CosTab(Rot.Roll),
+			CP = GMath.CosTab(Rot.Pitch),
+			CY = GMath.CosTab(Rot.Yaw);
+
+		// Transpose rotation angle.
+		*this *= FCoords(FVector(0, 0, 0),
+			FVector(CP * CY, SR * SP * CY - CR * SY, -(CR * SP * CY + SR * SY)),
+			FVector(CP * SY, SR * SP * SY + CR * CY, CY * SR - CR * SP * SY),
+			FVector(SP, -SR * CP, CR * CP));
+		return *this;
+	}
+	inline FCoords  operator/	(const FRotator& Rot) const
+	{
+		return FCoords(*this) /= Rot;
+	}
+	//FCoords& operator/=	(const FScale& Scale);
+	//FCoords  operator/	(const FScale& Scale) const;
+
+	inline FCoords TransposeAdjoint() const
+	{
+		FCoords C;
+		C.XAxis.X = YAxis.Y * ZAxis.Z - YAxis.Z * ZAxis.Y;
+		C.XAxis.Y = YAxis.Z * ZAxis.X - YAxis.X * ZAxis.Z;
+		C.XAxis.Z = YAxis.X * ZAxis.Y - YAxis.Y * ZAxis.X;
+		C.YAxis.X = ZAxis.Y * XAxis.Z - ZAxis.Z * XAxis.Y;
+		C.YAxis.Y = ZAxis.Z * XAxis.X - ZAxis.X * XAxis.Z;
+		C.YAxis.Z = ZAxis.X * XAxis.Y - ZAxis.Y * XAxis.X;
+		C.ZAxis.X = XAxis.Y * YAxis.Z - XAxis.Z * YAxis.Y;
+		C.ZAxis.Y = XAxis.Z * YAxis.X - XAxis.X * YAxis.Z;
+		C.ZAxis.Z = XAxis.X * YAxis.Y - XAxis.Y * YAxis.X;
+		return C;
+	}
+	inline FCoords TransposeAdjointMirror() const
+	{
+		FCoords C;
+		C.XAxis.X = YAxis.Y * ZAxis.Z - YAxis.Z * ZAxis.Y;
+		C.XAxis.Y = YAxis.Z * ZAxis.X - YAxis.X * ZAxis.Z;
+		C.XAxis.Z = YAxis.X * ZAxis.Y - YAxis.Y * ZAxis.X;
+		C.YAxis.X = ZAxis.Y * XAxis.Z - ZAxis.Z * XAxis.Y;
+		C.YAxis.Y = ZAxis.Z * XAxis.X - ZAxis.X * XAxis.Z;
+		C.YAxis.Z = ZAxis.X * XAxis.Y - ZAxis.Y * XAxis.X;
+		C.ZAxis.X = XAxis.Y * YAxis.Z - XAxis.Z * YAxis.Y;
+		C.ZAxis.Y = XAxis.Z * YAxis.X - XAxis.X * YAxis.Z;
+		C.ZAxis.Z = XAxis.X * YAxis.Y - XAxis.Y * YAxis.X;
+		if (Determinant() > 0.f)
+			C.Mirror();
+		return C;
+	}
+	inline void Mirror()
+	{
+		XAxis = -XAxis;
+		YAxis = -YAxis;
+		ZAxis = -ZAxis;
+	}
+	inline FLOAT Determinant() const
+	{
+		return FTriple(XAxis, YAxis, ZAxis);
+	}
+};
+
+inline FVector FVector::TransformPointBy(const FCoords& Coords) const
+{
+	FVector Temp = *this - Coords.Origin;
+	return FVector(Temp | Coords.XAxis, Temp | Coords.YAxis, Temp | Coords.ZAxis);
+}
+inline FVector FVector::TransformVectorBy(const FCoords& Coords) const
+{
+	return FVector(*this | Coords.XAxis, *this | Coords.YAxis, *this | Coords.ZAxis);
+}
+inline FVector FVector::PivotTransform(const FCoords& Coords) const
+{
+	return Coords.Origin + TransformVectorBy(Coords);
+}
+inline FQuat::FQuat(const FCoords& C)
+{
+	// Trace.
+	FLOAT Trace = C.XAxis.X + C.YAxis.Y + C.ZAxis.Z + 1.0f;
+	// Calculate directly for positive trace.
+	if (Trace > 0.f)
+	{
+		FLOAT S = 0.5f / appSqrt(Trace);
+		W = 0.25f / S;
+		X = (C.ZAxis.Y - C.YAxis.Z) * S;
+		Y = (C.XAxis.Z - C.ZAxis.X) * S;
+		Z = (C.YAxis.X - C.XAxis.Y) * S;
+		return;
+	}
+	// Or determine the major diagonal element.
+	if ((C.XAxis.X > C.YAxis.Y) && (C.XAxis.X > C.ZAxis.Z))
+	{
+		FLOAT SZ = 0.5f / appSqrt(1.0f + C.XAxis.X - C.YAxis.Y - C.ZAxis.Z);
+		X = 0.5f * SZ;
+		Y = (C.XAxis.Y + C.YAxis.X) * SZ;
+		Z = (C.XAxis.Z + C.ZAxis.X) * SZ;
+		W = (C.YAxis.Z + C.ZAxis.Y) * SZ;
+	}
+	else if (C.YAxis.Y > C.ZAxis.Z)
+	{
+		FLOAT SZ = 0.5f / appSqrt(1.0f + C.YAxis.Y - C.XAxis.X - C.ZAxis.Z);
+		X = (C.XAxis.Y + C.YAxis.X) * SZ;
+		Y = 0.5f * SZ;
+		Z = (C.YAxis.Z + C.ZAxis.Y) * SZ;
+		W = (C.XAxis.Z + C.ZAxis.X) * SZ;
+	}
+	else
+	{
+		FLOAT SZ = 0.5f / appSqrt(1.0f + C.ZAxis.Z - C.XAxis.X - C.YAxis.Y);
+		X = (C.XAxis.Z + C.ZAxis.X) * SZ;
+		Y = (C.YAxis.Z + C.ZAxis.Y) * SZ;
+		Z = 0.5f * SZ;
+		W = (C.XAxis.Y + C.YAxis.X) * SZ;
+	}
+}
 
 //
 //	FRangeMapMatrix - Maps points from a bounded range to another bounded range.

@@ -393,13 +393,17 @@ public:
 			for (INT i = 0; i < Summary.ExportCount; i++)
 			{
 				debugfSlow(TEXT("Export[%i] %ls Class %ls"), i, *ExportMap(i).ObjectName, *GetExportClassName(ExportMap(i).ClassIndex));
-				if (GetExportClassName(ExportMap(i).ClassIndex) == NAME_DukeMesh /* && !appStricmp(*ExportMap(i).ObjectName, TEXT("alien_Adultsnatcher"))*/)
+#if DEBUG_SINGLE_MESH
+				if (GetExportClassName(ExportMap(i).ClassIndex) == NAME_DukeMesh && !appStricmp(*ExportMap(i).ObjectName, DEBUG_MESH_NAME))
+#else
+				if (GetExportClassName(ExportMap(i).ClassIndex) == NAME_DukeMesh)
+#endif
 				{
 					FileAr->Seek(ExportMap(i).SerialOffset);
 					DM.Serialize(*this);
 					FString FileName = FString(BasePath) + DM.ConfigName;
 					warnf(TEXT("============ Load Mesh %ls at %ls ============="), *ExportMap(i).ObjectName, *FileName);
-					if (Df.LoadMesh(*FileName))
+					if (Df.LoadMesh(*FileName, *ExportMap(i).ObjectName))
 					{
 						FString BasePath = appBaseDir();
 						if (!num)

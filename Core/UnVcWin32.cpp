@@ -395,53 +395,16 @@ DOUBLE appSecondsSlow()
 //
 void appLaunchURL( const TCHAR* URL, const TCHAR* Parms, FString* Error )
 {
-	debugf( NAME_Log, TEXT("LaunchURL %s %s"), URL, Parms?Parms:TEXT("") );
-	INT Code = (INT)TCHAR_CALL_OS(ShellExecuteW(NULL,TEXT("open"),URL,Parms?Parms:TEXT(""),TEXT(""),SW_SHOWNORMAL),ShellExecuteA(NULL,"open",TCHAR_TO_ANSI(URL),Parms?TCHAR_TO_ANSI(Parms):"","",SW_SHOWNORMAL));
-	if( Error )
-		*Error = Code<=32 ? TEXT("Url Failed") : TEXT("");
 }
 
 void *appCreateProc( const TCHAR* URL, const TCHAR* Parms )
 {
-	debugf( NAME_Log, TEXT("CreateProc %s %s"), URL, Parms );
-
-	TCHAR CommandLine[1024];
-	appSprintf( CommandLine, TEXT("%s %s"), URL, Parms );
-
-	PROCESS_INFORMATION ProcInfo;
-	SECURITY_ATTRIBUTES Attr;
-	Attr.nLength = sizeof(SECURITY_ATTRIBUTES);
-	Attr.lpSecurityDescriptor = NULL;
-	Attr.bInheritHandle = TRUE;
-
-#if UNICODE
-	if( GUnicode && !GUnicodeOS )
-	{
-		STARTUPINFOA StartupInfoA = { sizeof(STARTUPINFO), NULL, NULL, NULL,
-			CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-			NULL, NULL, NULL, NULL, SW_HIDE, NULL, NULL,
-			NULL, NULL, NULL };
-		if( !CreateProcessA( NULL, TCHAR_TO_ANSI(CommandLine), &Attr, &Attr, TRUE, DETACHED_PROCESS | REALTIME_PRIORITY_CLASS,
-			NULL, NULL, &StartupInfoA, &ProcInfo ) )
-			return NULL;
-	}
-	else
-#endif
-	{
-		STARTUPINFO StartupInfo = { sizeof(STARTUPINFO), NULL, NULL, NULL,
-			CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-			NULL, NULL, NULL, NULL, SW_HIDE, NULL, NULL,
-			NULL, NULL, NULL };
-		if( !CreateProcess( NULL, CommandLine, &Attr, &Attr, TRUE, DETACHED_PROCESS | REALTIME_PRIORITY_CLASS,
-			NULL, NULL, &StartupInfo, &ProcInfo ) )
-			return NULL;
-	}
-	return (void*)ProcInfo.hProcess;
+	return nullptr;
 }
 
 UBOOL appGetProcReturnCode( void* ProcHandle, INT* ReturnCode )
 {
-	return GetExitCodeProcess( (HANDLE)ProcHandle, (DWORD*)ReturnCode ) && *((DWORD*)ReturnCode) != STILL_ACTIVE;
+	return FALSE;
 }
 
 /*-----------------------------------------------------------------------------

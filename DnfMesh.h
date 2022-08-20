@@ -144,6 +144,48 @@ struct VAxes3
 		}
 		return Result;
 	}
+	inline FQuat GetUEQuat() const
+	{
+		FQuat Result;
+
+		// Trace.
+		FLOAT Trace = vX.X + vY.Y + vZ.Z + 1.0f;
+		// Calculate directly for positive trace.
+		if (Trace > 0.f)
+		{
+			FLOAT S = 0.5f / appSqrt(Trace);
+			Result.W = 0.25f / S;
+			Result.X = (vZ.Y - vY.Z) * S;
+			Result.Y = (vX.Z - vZ.X) * S;
+			Result.Z = (vY.X - vX.Y) * S;
+		}
+		// Or determine the major diagonal element.
+		else if ((vX.X > vY.Y) && (vX.X > vZ.Z))
+		{
+			FLOAT SZ = 0.5f / appSqrt(1.0f + vX.X - vY.Y - vZ.Z);
+			Result.X = 0.5f * SZ;
+			Result.Y = (vX.Y + vY.X) * SZ;
+			Result.Z = (vX.Z + vZ.X) * SZ;
+			Result.W = (vY.Z + vZ.Y) * SZ;
+		}
+		else if (vY.Y > vZ.Z)
+		{
+			FLOAT SZ = 0.5f / appSqrt(1.0f + vY.Y - vX.X - vZ.Z);
+			Result.X = (vX.Y + vY.X) * SZ;
+			Result.Y = 0.5f * SZ;
+			Result.Z = (vY.Z + vZ.Y) * SZ;
+			Result.W = (vX.Z + vZ.X) * SZ;
+		}
+		else
+		{
+			FLOAT SZ = 0.5f / appSqrt(1.0f + vZ.Z - vX.X - vY.Y);
+			Result.X = (vX.Z + vZ.X) * SZ;
+			Result.Y = (vY.Z + vZ.Y) * SZ;
+			Result.Z = 0.5f * SZ;
+			Result.W = (vX.Y + vY.X) * SZ;
+		}
+		return Result;
+	}
 };
 
 // Byte describing effects for a mesh triangle.
@@ -310,36 +352,47 @@ struct SGeoFile
 
 struct VCoords3
 {
-	FMatrix mr;
+	VAxes3 mr;
+	FMatrix mtx;
 	FQuat r; // axial frame (rotation)
 	FVector t; // local origin (translation)
 	FVector s; // axis scale values (scale)
 
 	VCoords3()
-		: mr(FMatrix::Identity), r(FQuat::Identity), t(0, 0, 0), s(1, 1, 1)
+		: mr(), mtx(FMatrix::Identity), r(FQuat::Identity), t(0, 0, 0), s(1, 1, 1)
 	{}
 	VCoords3(const VCoords3& inC)
-		: mr(inC.mr), r(inC.r), t(inC.t), s(inC.s)
+		: mr(inC.mr), mtx(inC.mtx), r(inC.r), t(inC.t), s(inC.s)
 	{}
 	VCoords3(const FQuat& inRotate, const FVector& inTranslate = FVector(0, 0, 0), const FVector& inScale = FVector(1, 1, 1))
-		: mr(FVector(0, 0, 0), inRotate), r(inRotate), t(inTranslate), s(inScale)
+		: mr(inRotate), mtx(FVector(0,0,0), inRotate), r(inRotate), t(inTranslate), s(inScale)
 	{}
+	VCoords3(const VAxes3& inRotate, const FVector& inTranslate = FVector(0, 0, 0), const FVector& inScale = FVector(1, 1, 1))
+		: mr(inRotate), mtx(FVector(0, 0, 0), inRotate.GetQuat()), r(inRotate.GetQuat()), t(inTranslate), s(inScale)
+	{}
+
+	inline void UpdateQuat(const FQuat& NewQuat)
+	{
+		r = NewQuat;
+		mr = NewQuat;
+		mtx = FMatrix(FVector(0, 0, 0), NewQuat);
+	}
 
 	inline friend FVector operator >> (const FVector& inV, const VCoords3& inC) // world position -> coords position
 	{
-		return (inC.mr.TransformFVector(inV - inC.t) / inC.s);
+		return (((inV - inC.t) >> inC.mr) / inC.s);
 	}
 	inline friend FVector operator << (const FVector& inV, const VCoords3& inC) // coords position -> world position
 	{
-		return (inC.mr.InverseTransformFVector(inV * inC.s) + inC.t);
+		return (((inV * inC.s) << inC.mr) + inC.t);
 	}
 	inline friend VCoords3 operator >> (const VCoords3& inC1, const VCoords3& inC2) // world coords1 -> coords2-relative coords1
 	{
-		return(VCoords3(inC1.r * inC2.r, inC1.t >> inC2, inC1.s / inC2.s));
+		return(VCoords3(inC1.mr >> inC2.mr, inC1.t >> inC2, inC1.s / inC2.s));
 	}
 	inline friend VCoords3 operator << (const VCoords3& inC1, const VCoords3& inC2) // coords2-relative coords1 -> world coords1
 	{
-		return(VCoords3(inC1.r * (-inC2.r), inC1.t << inC2, inC1.s * inC2.s));
+		return(VCoords3(inC1.mr << inC2.mr, inC1.t << inC2, inC1.s * inC2.s));
 	}
 	inline VCoords3& operator >>= (const VCoords3& inC) { *this = *this >> inC; return(*this); }
 	inline VCoords3& operator <<= (const VCoords3& inC) { *this = *this << inC; return(*this); }
@@ -536,13 +589,52 @@ struct CCpjSklBone
 	FString name;
 	CCpjSklBone* parentBone;
 	VCoords3 baseCoords;
-	FQuat OrgQuat;
 	FLOAT length;
-	INT Index;
+	INT Index, ParentIndex;
+
+	FQuat FinalQuat;
+	FVector FinalPose;
+
+	FQuat GetParentQuat() const
+	{
+		FQuat Result = baseCoords.r;
+		if (parentBone)
+			Result = Result * parentBone->GetParentQuat();
+		return Result;
+	}
+	VAxes3 GetParentAxes() const
+	{
+		if (parentBone)
+		{
+			VAxes3 Parent = parentBone->GetParentAxes();
+			return baseCoords.mr << Parent;
+		}
+		return baseCoords.mr;
+	}
+	FCoords GetParentFCoords() const
+	{
+		FCoords Result(baseCoords.t, baseCoords.r);
+		if (parentBone)
+			Result = Result.ApplyPivot(parentBone->GetParentFCoords());
+		return Result;
+	}
+	FVector GetParentPose() const
+	{
+		FVector Result = baseCoords.t;
+		if (parentBone)
+			Result += parentBone->GetParentPose();
+		return Result;
+	}
+	VCoords3 GetParentCoords() const
+	{
+		if (parentBone)
+			return baseCoords << parentBone->GetParentCoords();
+		return baseCoords;
+	}
 };
 struct CCpjSklWeight
 {
-	CCpjSklBone* bone;
+	INT BoneIndex;
 	FLOAT factor;
 	FVector offsetPos;
 };
@@ -731,16 +823,17 @@ struct CCpjSeqTranslate
 public:
 	NWord boneIndex;
 	NWord reserved;
-	FVector translate;
+	FVector translate, FinalPose;
 };
 struct CCpjSeqRotate
 {
 public:
-	NWord boneIndex;
+	INT boneIndex;
 	NSWord roll;
 	NSWord pitch;
 	NSWord yaw;
-	FQuat quat;
+	FQuat quat, FinalQuat;
+	VAxes3 axes;
 };
 struct CCpjSeqScale
 {
@@ -761,6 +854,31 @@ struct CCpjSeqFrame
 			if (rotates(i).boneIndex == (NWord)RefBone)
 				return i;
 		return INDEX_NONE;
+	}
+	FCoords GetParentFCoords(const CCpjSklBone& Bone) const
+	{
+		FCoords Result(translates(Bone.Index).translate, rotates(Bone.Index).quat);
+		if (Bone.parentBone)
+			Result = Result.ApplyPivot(GetParentFCoords(*Bone.parentBone));
+		return Result;
+	}
+	VAxes3 GetParentAxes(const CCpjSklBone& Bone) const
+	{
+		if (Bone.parentBone)
+		{
+			VAxes3 Parent = GetParentAxes(*Bone.parentBone);
+			return VAxes3(rotates(Bone.Index).quat) << Parent;
+		}
+		return VAxes3(rotates(Bone.Index).quat);
+	}
+	FQuat GetParentQuat(const CCpjSklBone& Bone) const
+	{
+		if (Bone.parentBone)
+		{
+			FQuat Parent = GetParentQuat(*Bone.parentBone);
+			return Parent * rotates(Bone.Index).quat;
+		}
+		return rotates(Bone.Index).quat;
 	}
 };
 struct CCpjSeqEvent
@@ -828,6 +946,10 @@ inline FQuat ToUEQuat(const FQuat& Q)
 {
 	return FQuat(Q.Z, Q.X, Q.Y, Q.W);
 }
+inline FQuat ToDnfQuat(const FQuat& Q)
+{
+	return FQuat(Q.Y, Q.Z, Q.X, Q.W);
+}
 
 inline FString ReadStringByte(BYTE* Data)
 {
@@ -879,6 +1001,41 @@ struct VMaterial
 	INT					LodBias;       // material-specific lod bias
 	INT					LodStyle;      // material-specific lod style
 };
+
+inline void SwapBones(CCpjSklBone* B, const INT Num, const INT IndexA, const INT IndexB, TArray<CCpjSklVert>& Verts)
+{
+	appMemswap(&B[IndexA], &B[IndexB], sizeof(CCpjSklBone));
+	B[IndexA].Index = IndexA;
+	B[IndexB].Index = IndexB;
+
+	// Update references.
+	INT i;
+	for (i = 0; i < Num; ++i)
+	{
+		if (B[i].ParentIndex == IndexA)
+		{
+			B[i].ParentIndex = IndexB;
+			B[i].parentBone = &B[IndexB];
+		}
+		else if (B[i].ParentIndex == IndexB)
+		{
+			B[i].ParentIndex = IndexA;
+			B[i].parentBone = &B[IndexA];
+		}
+	}
+	INT j;
+	for (i = (Verts.Num() - 1); i >= 0; --i)
+	{
+		CCpjSklWeight* w = &Verts(i).weights(0);
+		for (j = (Verts(i).weights.Num() - 1); j >= 0; --j)
+		{
+			if (w[j].BoneIndex == IndexA)
+				w[j].BoneIndex = IndexB;
+			else if (w[j].BoneIndex == IndexB)
+				w[j].BoneIndex = IndexA;
+		}
+	}
+}
 
 class DnfMesh
 {
@@ -933,7 +1090,6 @@ class DnfMesh
 	}
 	inline void Clear()
 	{
-		CurFile.Empty();
 		Animations.Empty();
 		m_Sections.Empty();
 		m_Verts.Empty();
@@ -981,6 +1137,7 @@ class DnfMesh
 				for (j = 0; j < C.commands.Num(); ++j)
 				{
 					const TCHAR* Cmd = *C.commands(j);
+					GLog->Log(NAME_Cmd, Cmd);
 					if (ParseCommand(&Cmd, TEXT("SetAuthor")))
 					{
 						while (*Cmd == ' ')
@@ -1024,7 +1181,7 @@ class DnfMesh
 						CMD_Bounds.Max.Y = ParseNextFloat(&Cmd);
 						CMD_Bounds.Max.Z = ParseNextFloat(&Cmd);
 					}
-					else debugf(NAME_ExecWarning, TEXT("Unknown command: %ls"), Cmd);
+					//else debugf(NAME_ExecWarning, TEXT("Unknown command: %ls"), Cmd);
 				}
 			}
 		}
@@ -1041,6 +1198,20 @@ class DnfMesh
 		{
 			const INT numSkel = skm_Bones.Num();
 			INT z;
+
+			// Sort bones (root and parent bones must come first)!
+			for (i = 0; i < (numSkel - 1); ++i)
+			{
+				z = i;
+				for (j = (i + 1); j < numSkel; ++j)
+				{
+					if (skm_Bones(j).ParentIndex < skm_Bones(z).ParentIndex)
+						z = j;
+				}
+				if (z != i)
+					SwapBones(&skm_Bones(0), skm_Bones.Num(), i, z, skm_Verts);
+			}
+
 			for (i = 0; i < Animations.Num(); ++i)
 			{
 				FAnimSequence& A = Animations(i);
@@ -1049,7 +1220,7 @@ class DnfMesh
 				{
 					CCpjSeqFrame& F = A.m_Frames(j);
 
-					// Sort bones and transform them.
+					// Sort bones and transform them from DNF local pose -> world pose.
 					{
 						TArray<CCpjSeqScale> Tmp;
 						Tmp.Empty(numSkel);
@@ -1069,14 +1240,142 @@ class DnfMesh
 						Tmp.Empty(numSkel);
 						Tmp.Add(numSkel);
 						for (z = 0; z < numSkel; ++z)
+						{
 							Tmp(z).quat = skm_Bones(z).baseCoords.r;
+							Tmp(z).boneIndex = INDEX_NONE;
+						}
+#if 1
 						for (z = 0; z < F.rotates.Num(); ++z)
 						{
 							INT iRef = FindBone(*A.m_BoneInfo(F.rotates(z).boneIndex).name);
-							if (iRef == 0)
-								Tmp(iRef).quat = -F.rotates(z).quat * skm_Bones(iRef).baseCoords.r;
-							else if (iRef > 0)
-								Tmp(iRef).quat = F.rotates(z).quat * skm_Bones(iRef).baseCoords.r;
+							if (iRef >= 0)
+							{
+#if 1
+								Tmp(iRef).quat = F.rotates(z).quat;
+#else
+								VAxes3 R;
+								FQuat qR = (~F.rotates(z).axes).GetQuat();
+								R >>= qR;
+								R = R << skm_Bones(z).baseCoords.mr;
+								Tmp(iRef).quat = R.GetUEQuat();
+#endif
+								Tmp(iRef).boneIndex = z;
+							}
+						}
+						TArray<FQuat> BoneQuats(numSkel);
+						for (z = 0; z < numSkel; ++z)
+						{
+							if (Tmp(z).boneIndex != INDEX_NONE)
+							{
+								if (skm_Bones(z).parentBone)
+								{
+									FQuat Q = BoneQuats(skm_Bones(z).ParentIndex) * skm_Bones(z).baseCoords.r;
+									Tmp(z).quat = -(skm_Bones(z).baseCoords.r * Tmp(z).quat);
+								}
+								else Tmp(z).quat = -(skm_Bones(z).baseCoords.r * Tmp(z).quat);
+							}
+							if (skm_Bones(z).parentBone)
+								BoneQuats(z) = BoneQuats(skm_Bones(z).ParentIndex) * Tmp(z).quat;
+							else BoneQuats(z) = Tmp(z).quat;
+						}
+#else
+						TArray<BYTE> InUse(numSkel);
+						TArray<VCoords3> BoneCoords(numSkel);
+						appMemzero(&InUse(0), numSkel);
+						for (z = 0; z < F.rotates.Num(); ++z)
+						{
+							INT iRef = FindBone(*A.m_BoneInfo(F.rotates(z).boneIndex).name);
+							if (iRef >= 0)
+							{
+								InUse(iRef) = TRUE;
+								BoneCoords(iRef) = VCoords3();
+								BoneCoords(iRef).mr >>= F.rotates(z).quat;
+								BoneCoords(iRef) = BoneCoords(iRef) << skm_Bones(iRef).baseCoords;
+							}
+						}
+						TArray<FQuat> WorldQuats(numSkel);
+						for (z = 0; z < numSkel; ++z)
+						{
+							if (!InUse(z))
+								BoneCoords(z) = BoneCoords(z);
+							INT iParent = skm_Bones(z).ParentIndex;
+							if (iParent >= 0)
+								BoneCoords(z) <<= BoneCoords(iParent);
+
+							if (InUse(z))
+							{
+								FQuat NewQuat = BoneCoords(z).mr.GetQuat();
+								if (iParent >= 0)
+								{
+									NewQuat = (-WorldQuats(iParent)) * NewQuat;
+									WorldQuats(z) = WorldQuats(iParent) * NewQuat;
+									AlignFQuatWith(WorldQuats(z), skm_Bones(z).baseCoords.r);
+								}
+								else WorldQuats(z) = NewQuat;
+								Tmp(z).quat = NewQuat;
+								
+							}
+							else
+							{
+								if (iParent >= 0)
+									WorldQuats(z) = WorldQuats(iParent) * Tmp(z).quat;
+								else WorldQuats(z) = Tmp(z).quat;
+							}
+						}
+#endif
+						//if (/*!appStricmp(*A.AnimName, TEXT("Telek_Idle")) &&*/ i==0 && j == 4)
+						{
+							TArray<FCoords> UECoords(numSkel);
+							TArray<VAxes3> DNFCoords(numSkel);
+							FCoords C;
+							VAxes3 X;
+							FQuat UERot, DNFRot;
+							FRotator OR;
+							for (INT Pass = 0; Pass < 2; ++Pass)
+							{
+								//debugf(TEXT("BEGIN[%i] %ls Frame %i"), Pass, *A.AnimName, j);
+								for (z = 0; z < numSkel; ++z)
+								{
+									{
+										C = FCoords(FVector(0, 0, 0), Tmp(z).quat);
+										if (skm_Bones(z).parentBone)
+											C = C.ApplyPivot(UECoords(skm_Bones(z).ParentIndex));
+										UECoords(z) = C;
+									}
+									{
+										X = skm_Bones(z).baseCoords.mr;
+										if (skm_Bones(z).parentBone)
+											X <<= DNFCoords(skm_Bones(z).ParentIndex);
+										OR = FRotator(0, 0, 0);
+										if (Tmp(z).boneIndex != INDEX_NONE)
+										{
+											OR = FRotator(F.rotates(Tmp(z).boneIndex).pitch, F.rotates(Tmp(z).boneIndex).yaw, F.rotates(Tmp(z).boneIndex).roll);
+											VAxes3 R;
+											FQuat qR = (~F.rotates(Tmp(z).boneIndex).axes).GetQuat();
+											R >>= qR;
+											X = R << skm_Bones(z).baseCoords.mr;
+										}
+										else X = skm_Bones(z).baseCoords.mr;
+										if (skm_Bones(z).parentBone)
+											X <<= DNFCoords(skm_Bones(z).ParentIndex);
+										DNFCoords(z) = X;
+									}
+
+									UERot = C;
+									DNFRot = X.GetUEQuat();
+									FLOAT AngDiff = FQuatError(DNFRot, UERot);
+									//debugf(TEXT("   Bone[%i] %s - (%f,%f,%f,%f)(%f,%f,%f,%f) -> (%i,%i,%i) AngErr %f"), z, *skm_Bones(z).name, UERot.X, UERot.Y, UERot.Z, UERot.W, DNFRot.X, DNFRot.Y, DNFRot.Z, DNFRot.W, OR.Yaw, OR.Pitch, OR.Roll, AngDiff);
+
+									if (AngDiff>0.05f)
+									{
+										AlignFQuatWith(UERot, DNFRot);
+										UERot = (-UERot) * DNFRot;
+										UERot.Normalize();
+										//debugf(TEXT("     -> (%f,%f,%f,%f)"), UERot.X, UERot.Y, UERot.Z, UERot.W);
+										Tmp(z).quat = Tmp(z).quat * (-UERot);
+									}
+								}
+							}
 						}
 						ExchangeArray(Tmp, F.rotates);
 					}
@@ -1084,49 +1383,112 @@ class DnfMesh
 						TArray<CCpjSeqTranslate> Tmp;
 						Tmp.Empty(numSkel);
 						Tmp.Add(numSkel);
-						VCoords3 Base;
-						VCoords3 Delta;
+						FVector Delta;
 						for (z = 0; z < numSkel; ++z)
-							Tmp(z).translate = skm_Bones(z).baseCoords.t;
+							Tmp(z).translate = skm_Bones(z).baseCoords.t / F.scales(z).scale;
 						for (z = 0; z < F.translates.Num(); ++z)
 						{
 							INT iRef = FindBone(*A.m_BoneInfo(F.translates(z).boneIndex).name);
 							if (iRef >= 0)
 							{
-								Base = skm_Bones(iRef).baseCoords;
-								Delta = VCoords3();
-								Delta.t = (F.translates(z).translate * F.scales(iRef).scale);
-								Delta.mr *= FMatrix(FVector(0, 0, 0), F.rotates(iRef).quat);
-								Base = Delta << Base;
-								Tmp(iRef).translate = -Base.t;
+								Delta = (F.translates(z).translate / F.scales(iRef).scale);
+								Tmp(iRef).translate = Delta << skm_Bones(iRef).baseCoords;
 							}
 						}
+						for (z = 0; z < numSkel; ++z)
+							if (skm_Bones(z).parentBone)
+								Tmp(z).translate = Tmp(z).translate << F.GetParentAxes(*skm_Bones(z).parentBone); // DNF bone coords -> world coords
 						ExchangeArray(Tmp, F.translates);
 					}
+
+					// world pose -> UE pose
 					for (z = 0; z < numSkel; ++z)
 					{
 						F.rotates(z).quat = ToUEQuat(F.rotates(z).quat);
 						F.translates(z).translate = ToUEVector(F.translates(z).translate);
 					}
+					for (z = 0; z < numSkel; ++z)
+					{
+						CCpjSklBone& B = skm_Bones(z);
+						FVector V = F.translates(z).translate;
+						if (B.parentBone)
+						{
+							FCoords C = F.GetParentFCoords(*B.parentBone);
+							F.translates(z).FinalPose = F.translates(z).translate.TransformVectorBy(C.Transpose());
+						}
+						else F.translates(z).FinalPose = F.translates(z).translate;
+						F.rotates(z).FinalQuat = F.rotates(z).quat;
+					}
 				}
 			}
 
+			// Dnf verts -> UE verts
 			for (i = 0; i < m_Verts.Num(); ++i)
 			{
 				CCpjGeoVert& V = m_Verts(i);
 				V.refPosition = ToUEVector(V.refPosition);
 			}
+
+			// DNF bone coords -> world bone coords
 			for (i = 0; i < numSkel; ++i)
 			{
 				CCpjSklBone& B = skm_Bones(i);
-				B.OrgQuat = B.baseCoords.r;
+				if (B.parentBone)
+					B.baseCoords.t = B.baseCoords.t << B.parentBone->GetParentAxes(); // DNF bone coords -> world coords
+			}
+
+			// DNF quat -> UE quat
+			for (i = 0; i < numSkel; ++i)
+			{
+				CCpjSklBone& B = skm_Bones(i);
 				B.baseCoords.r = ToUEQuat(B.baseCoords.r);
-				B.baseCoords.mr = FMatrix(FVector(0, 0, 0), B.baseCoords.r);
 				B.baseCoords.t = ToUEVector(B.baseCoords.t);
 			}
+
+			// world bone coords -> UE bone coords
+			for (i = 0; i < numSkel; ++i)
+			{
+				CCpjSklBone& B = skm_Bones(i);
+				if (B.parentBone)
+				{
+					FCoords C = B.parentBone->GetParentFCoords();
+					B.FinalPose = B.baseCoords.t.TransformVectorBy(C.Transpose());
+				}
+				else B.FinalPose = B.baseCoords.t;
+				B.FinalQuat = B.baseCoords.r;
+			}
+#if DEBUG_SINGLE_MESH
+			if (!appStricmp(*CurFile, DEBUG_MESH_NAME))
+			{
+				FStringOutputDevice StrT;
+				StrT.Log(TEXT("Class MeshDebug extends Object;\r\n\r\nvar array<vector> V;\r\nvar array<string> B;\r\nvar Mesh Mesh;\r\n\r\ndefaultproperties\r\n{\r\n"));
+				StrT.Logf(TEXT("\tMesh=%ls\r\n"), DEBUG_MESH_NAME);
+				FVector Va, Vb;
+				for (i = 0; i < numSkel; ++i)
+				{
+					CCpjSklBone& B = skm_Bones(i);
+					if (B.parentBone)
+					{
+#if 0
+						Va = B.GetParentCoords().t;
+						Vb = B.parentBone->GetParentCoords().t;
+#else
+						Va = B.GetParentPose();
+						Vb = B.parentBone->GetParentPose();
+#endif
+						Va = (Va * CMD_Scale) - CMD_Offset;
+						Vb = (Vb * CMD_Scale) - CMD_Offset;
+						StrT.Logf(TEXT("\tV.Add((X=%f,Y=%f,Z=%f))\r\n\tV.Add((X=%f,Y=%f,Z=%f))\r\n"), Va.X, Va.Y, Va.Z, Vb.X, Vb.Y, Vb.Z);
+						StrT.Logf(TEXT("\tB.Add(\"%ls\")\r\n\tB.Add(\"%ls\")\r\n"), *B.name, *B.parentBone->name);
+					}
+				}
+				StrT.Log(TEXT("}\r\n"));
+				appSaveStringToFile(StrT, TEXT("C:\\Src\\Unreal\\test\\Classes\\MeshDebug.uc"));
+			}
+#endif
 		}
 	}
-	inline const TCHAR* ReadString(FArchive& Ar)
+	static inline const TCHAR* ReadString(FArchive& Ar)
 	{
 		static TCHAR v[1024];
 		TCHAR* p = v;
@@ -1238,14 +1600,17 @@ class DnfMesh
 							SSeqBoneRotate* iR = &fileBoneRotate[iF->firstBoneRotate + j];
 							CCpjSeqRotate* oR = &oF->rotates(j);
 							oR->boneIndex = iR->boneIndex;
+#if 0
+							oR->roll = 5;
+							oR->pitch = 0;
+							oR->yaw = 0;
+#else
 							oR->roll = iR->roll;
 							oR->pitch = iR->pitch;
 							oR->yaw = iR->yaw;
-							VAxes3 ax(FRotator(iR->pitch, iR->yaw, iR->roll));
-							ax = ~ax;
-							oR->quat = ax.GetQuat();
-							//oR->quat = FRotator(iR->pitch, iR->yaw, iR->roll).Quaternion();
-							//debugf(TEXT("Cannibal Log: [Log] AnimQ %f,%f,%f,%f"), oR->quat.X, oR->quat.Y, oR->quat.Z, oR->quat.W);
+#endif
+							oR->axes = VAxes3(FRotator(oR->pitch, oR->yaw, oR->roll));
+							oR->quat = oR->axes.GetQuat();
 						}
 						oF->scales.Add(iF->numBoneScale);
 						for (j = 0; j < iF->numBoneScale; j++)
@@ -1531,6 +1896,15 @@ class DnfMesh
 						//debugf(TEXT("Bone %ls %i,%i,%i (%f,%f,%f,%f)"), *oB->name, R.Yaw, R.Pitch, R.Roll, oB->baseCoords.r.X, oB->baseCoords.r.Y, oB->baseCoords.r.Z, oB->baseCoords.r.W);
 					}
 
+					// Assign parent index!
+					for (i = 0; i < file->numBones; i++)
+					{
+						CCpjSklBone& oB = skm_Bones(i);
+						if (oB.parentBone)
+							oB.ParentIndex = oB.parentBone->Index;
+						else oB.ParentIndex = INDEX_NONE;
+					}
+
 					// vertices
 					for (i = 0; i < file->numVerts; i++)
 					{
@@ -1541,7 +1915,7 @@ class DnfMesh
 						{
 							SSklWeight* iW = &fileWeights[iV->firstWeight + j];
 							CCpjSklWeight* oW = &oV->weights(j);
-							oW->bone = &skm_Bones(iW->boneIndex);
+							oW->BoneIndex = iW->boneIndex;
 							oW->factor = iW->weightFactor;
 							oW->offsetPos = iW->offsetPos;
 						}
@@ -1669,9 +2043,9 @@ class DnfMesh
 		return bResult;
 	}
 public:
-	UBOOL LoadMesh(const TCHAR* File)
+	UBOOL LoadMesh(const TCHAR* File, const TCHAR* MeshName)
 	{
-		CurFile = File;
+		CurFile = MeshName;
 		const TCHAR* Str = File;
 		const TCHAR* fStr = NULL;
 		while (*Str)
@@ -2008,8 +2382,8 @@ void DnfMesh::ExportPSK(FArchive& Ar)
 			{
 				VBone& B = Bones(i);
 				CCpjSklBone& RB = skm_Bones(i);
-				B.BonePos.Orientation = RB.baseCoords.r;
-				B.BonePos.Position = RB.baseCoords.t;
+				B.BonePos.Orientation = RB.FinalQuat;
+				B.BonePos.Position = RB.FinalPose;
 				B.Flags = 0;
 				CopyStringToAnsi(B.Name, *RB.name, ARRAY_COUNT(B.Name));
 				INT numCh = 0;
@@ -2055,7 +2429,7 @@ void DnfMesh::ExportPSK(FArchive& Ar)
 					for (j = 0; j < wcount; j++)
 					{
 						VRawBoneInfluence* inf = new(Influences)VRawBoneInfluence();
-						inf->BoneIndex = w[j].bone->Index;
+						inf->BoneIndex = w[j].BoneIndex;
 						inf->PointIndex = i;
 						if (wcount == 1)
 							inf->Weight = 1.f;
@@ -2084,7 +2458,7 @@ void DnfMesh::ExportPSK(FArchive& Ar)
 					for (j = 0; j < wcount; j++)
 					{
 						VRawBoneInfluence* inf = new(Influences)VRawBoneInfluence();
-						inf->BoneIndex = w[j].bone->Index;
+						inf->BoneIndex = w[j].BoneIndex;
 						inf->PointIndex = i;
 						if (wcount == 1)
 							inf->Weight = 1.f;
@@ -2213,8 +2587,8 @@ void DnfMesh::ExportPSA(FArchive& Ar)
 				TTime = FLOAT(z);
 				for (j = 0; j < NumBones; ++j)
 				{
-					Q->Orientation = F.rotates(j).quat;
-					Q->Position = F.translates(j).translate;
+					Q->Orientation = F.rotates(j).FinalQuat;
+					Q->Position = F.translates(j).FinalPose;
 					Q->Time = TTime;
 					++Q;
 				}

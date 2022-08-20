@@ -2,6 +2,12 @@
 //
 
 #include "CorePrivate.h"
+
+#define DEBUG_SINGLE_MESH 0
+#if DEBUG_SINGLE_MESH
+#define DEBUG_MESH_NAME TEXT("Octobrain")
+#endif
+
 #include "DnfMesh.h"
 #include "UnLinker.h"
 
@@ -117,7 +123,7 @@ int _tmain(int argc, _TCHAR* argv[])
 		GIsGuarded = 0;
 		Error.HandleError();
 	}
-	system("pause");
+	//system("pause");
 	appExit();
 	return ErrorLevel;
 }

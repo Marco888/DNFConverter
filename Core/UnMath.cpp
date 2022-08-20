@@ -339,6 +339,7 @@ const FMatrix FMatrix::Identity(FPlane(1,0,0,0),FPlane(0,1,0,0),FPlane(0,0,1,0),
 
 const FQuat FQuat::Identity(0,0,0,1);
 
+const FCoords FCoords::UnitCoords(FVector(0, 0, 0), FVector(1, 0, 0), FVector(0, 1, 0), FVector(0, 0, 1));
 
 FQuat::FQuat( const FMatrix& M )
 {
