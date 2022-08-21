@@ -13,6 +13,16 @@ typedef signed short NSWord;
 #define CPJVECTOR FVector
 #define CPJQUAT FQuat
 
+#if DEBUG_SINGLE_MESH
+#define EDIT_FILE_TEXT 0
+#endif
+#if EDIT_FILE_TEXT
+static FArchive* OutFile = NULL;
+#endif
+
+static const FQuat QBaseRot(0.5f, 0.5f, 0.5f, 0.5f);
+static const FCoords CoordsBaseRot(FCoords::UnitCoords * FRotator(0, 16384, -16384));
+
 inline void Q_AxisAngle(FQuat& Q, const FVector& inAxis, float inAngle) // construct in axis/angle form (named constructor)
 {
 	// v = -inAxis; v.Normalize(); v *= (float)sin(inAngle*0.5f); s = (float)cos(inAngle*0.5f);
@@ -829,10 +839,7 @@ struct CCpjSeqRotate
 {
 public:
 	INT boneIndex;
-	NSWord roll;
-	NSWord pitch;
-	NSWord yaw;
-	FQuat quat, FinalQuat;
+	FQuat quat,InvQuat;
 	VAxes3 axes;
 };
 struct CCpjSeqScale
@@ -934,6 +941,7 @@ struct CCpjLodLevel
 	TArray<CCpjLodTri> triangles;
 };
 
+#if 1
 inline FVector ToUECoords(const FVector& V)
 {
 	return FVector(V.Z, -V.X, V.Y);
@@ -950,6 +958,24 @@ inline FQuat ToDnfQuat(const FQuat& Q)
 {
 	return FQuat(Q.Y, Q.Z, Q.X, Q.W);
 }
+#else
+inline FVector ToUECoords(const FVector& V)
+{
+	return V;
+}
+inline FVector ToUEVector(const FVector& V)
+{
+	return V;
+}
+inline FQuat ToUEQuat(const FQuat& Q)
+{
+	return Q;
+}
+inline FQuat ToDnfQuat(const FQuat& Q)
+{
+	return Q;
+}
+#endif
 
 inline FString ReadStringByte(BYTE* Data)
 {
@@ -1215,6 +1241,11 @@ class DnfMesh
 			for (i = 0; i < Animations.Num(); ++i)
 			{
 				FAnimSequence& A = Animations(i);
+				/*if (A.AnimName != TEXT("IdleA"))
+				{
+					Animations.Remove(i--);
+					continue;
+				}*/
 
 				for (j = 0; j < A.m_Frames.Num(); ++j)
 				{
@@ -1226,158 +1257,54 @@ class DnfMesh
 						Tmp.Empty(numSkel);
 						Tmp.Add(numSkel);
 						for (z = 0; z < numSkel; ++z)
+						{
 							Tmp(z).scale = FVector(1, 1, 1);
+							Tmp(z).boneIndex = INDEX_NONE;
+						}
 						for (z = 0; z < F.scales.Num(); ++z)
 						{
 							INT iRef = FindBone(*A.m_BoneInfo(F.scales(z).boneIndex).name);
 							if (iRef >= 0)
+							{
 								Tmp(iRef).scale = F.scales(z).scale;
+								Tmp(iRef).boneIndex = z;
+							}
 						}
 						ExchangeArray(Tmp, F.scales);
 					}
 					{
-						TArray<CCpjSeqRotate> Tmp;
-						Tmp.Empty(numSkel);
-						Tmp.Add(numSkel);
+						TArray<CCpjSeqRotate> Tmp(numSkel);
 						for (z = 0; z < numSkel; ++z)
 						{
-							Tmp(z).quat = skm_Bones(z).baseCoords.r;
+							Tmp(z).quat = FQuat::Identity;
+							Tmp(z).axes = VAxes3();
 							Tmp(z).boneIndex = INDEX_NONE;
 						}
-#if 1
 						for (z = 0; z < F.rotates.Num(); ++z)
 						{
 							INT iRef = FindBone(*A.m_BoneInfo(F.rotates(z).boneIndex).name);
 							if (iRef >= 0)
 							{
-#if 1
 								Tmp(iRef).quat = F.rotates(z).quat;
-#else
-								VAxes3 R;
-								FQuat qR = (~F.rotates(z).axes).GetQuat();
-								R >>= qR;
-								R = R << skm_Bones(z).baseCoords.mr;
-								Tmp(iRef).quat = R.GetUEQuat();
-#endif
+								Tmp(iRef).axes = F.rotates(z).axes;
 								Tmp(iRef).boneIndex = z;
 							}
 						}
-						TArray<FQuat> BoneQuats(numSkel);
-						for (z = 0; z < numSkel; ++z)
-						{
-							if (Tmp(z).boneIndex != INDEX_NONE)
-							{
-								if (skm_Bones(z).parentBone)
-								{
-									FQuat Q = BoneQuats(skm_Bones(z).ParentIndex) * skm_Bones(z).baseCoords.r;
-									Tmp(z).quat = -(skm_Bones(z).baseCoords.r * Tmp(z).quat);
-								}
-								else Tmp(z).quat = -(skm_Bones(z).baseCoords.r * Tmp(z).quat);
-							}
-							if (skm_Bones(z).parentBone)
-								BoneQuats(z) = BoneQuats(skm_Bones(z).ParentIndex) * Tmp(z).quat;
-							else BoneQuats(z) = Tmp(z).quat;
-						}
-#else
-						TArray<BYTE> InUse(numSkel);
-						TArray<VCoords3> BoneCoords(numSkel);
-						appMemzero(&InUse(0), numSkel);
-						for (z = 0; z < F.rotates.Num(); ++z)
-						{
-							INT iRef = FindBone(*A.m_BoneInfo(F.rotates(z).boneIndex).name);
-							if (iRef >= 0)
-							{
-								InUse(iRef) = TRUE;
-								BoneCoords(iRef) = VCoords3();
-								BoneCoords(iRef).mr >>= F.rotates(z).quat;
-								BoneCoords(iRef) = BoneCoords(iRef) << skm_Bones(iRef).baseCoords;
-							}
-						}
-						TArray<FQuat> WorldQuats(numSkel);
-						for (z = 0; z < numSkel; ++z)
-						{
-							if (!InUse(z))
-								BoneCoords(z) = BoneCoords(z);
-							INT iParent = skm_Bones(z).ParentIndex;
-							if (iParent >= 0)
-								BoneCoords(z) <<= BoneCoords(iParent);
+						ExchangeArray(Tmp, F.rotates);
 
-							if (InUse(z))
+						for (z = 0; z < numSkel; ++z)
+						{
+							if (skm_Bones(z).parentBone)
 							{
-								FQuat NewQuat = BoneCoords(z).mr.GetQuat();
-								if (iParent >= 0)
-								{
-									NewQuat = (-WorldQuats(iParent)) * NewQuat;
-									WorldQuats(z) = WorldQuats(iParent) * NewQuat;
-									AlignFQuatWith(WorldQuats(z), skm_Bones(z).baseCoords.r);
-								}
-								else WorldQuats(z) = NewQuat;
-								Tmp(z).quat = NewQuat;
-								
+								F.rotates(z).quat = skm_Bones(z).baseCoords.r * F.rotates(z).quat;
+								F.rotates(z).InvQuat = skm_Bones(z).baseCoords.r / F.rotates(z).quat;
 							}
 							else
 							{
-								if (iParent >= 0)
-									WorldQuats(z) = WorldQuats(iParent) * Tmp(z).quat;
-								else WorldQuats(z) = Tmp(z).quat;
+								F.rotates(z).quat = skm_Bones(z).baseCoords.r / F.rotates(z).quat;
+								F.rotates(z).InvQuat = F.rotates(z).quat;
 							}
 						}
-#endif
-						//if (/*!appStricmp(*A.AnimName, TEXT("Telek_Idle")) &&*/ i==0 && j == 4)
-						{
-							TArray<FCoords> UECoords(numSkel);
-							TArray<VAxes3> DNFCoords(numSkel);
-							FCoords C;
-							VAxes3 X;
-							FQuat UERot, DNFRot;
-							FRotator OR;
-							for (INT Pass = 0; Pass < 2; ++Pass)
-							{
-								//debugf(TEXT("BEGIN[%i] %ls Frame %i"), Pass, *A.AnimName, j);
-								for (z = 0; z < numSkel; ++z)
-								{
-									{
-										C = FCoords(FVector(0, 0, 0), Tmp(z).quat);
-										if (skm_Bones(z).parentBone)
-											C = C.ApplyPivot(UECoords(skm_Bones(z).ParentIndex));
-										UECoords(z) = C;
-									}
-									{
-										X = skm_Bones(z).baseCoords.mr;
-										if (skm_Bones(z).parentBone)
-											X <<= DNFCoords(skm_Bones(z).ParentIndex);
-										OR = FRotator(0, 0, 0);
-										if (Tmp(z).boneIndex != INDEX_NONE)
-										{
-											OR = FRotator(F.rotates(Tmp(z).boneIndex).pitch, F.rotates(Tmp(z).boneIndex).yaw, F.rotates(Tmp(z).boneIndex).roll);
-											VAxes3 R;
-											FQuat qR = (~F.rotates(Tmp(z).boneIndex).axes).GetQuat();
-											R >>= qR;
-											X = R << skm_Bones(z).baseCoords.mr;
-										}
-										else X = skm_Bones(z).baseCoords.mr;
-										if (skm_Bones(z).parentBone)
-											X <<= DNFCoords(skm_Bones(z).ParentIndex);
-										DNFCoords(z) = X;
-									}
-
-									UERot = C;
-									DNFRot = X.GetUEQuat();
-									FLOAT AngDiff = FQuatError(DNFRot, UERot);
-									//debugf(TEXT("   Bone[%i] %s - (%f,%f,%f,%f)(%f,%f,%f,%f) -> (%i,%i,%i) AngErr %f"), z, *skm_Bones(z).name, UERot.X, UERot.Y, UERot.Z, UERot.W, DNFRot.X, DNFRot.Y, DNFRot.Z, DNFRot.W, OR.Yaw, OR.Pitch, OR.Roll, AngDiff);
-
-									if (AngDiff>0.05f)
-									{
-										AlignFQuatWith(UERot, DNFRot);
-										UERot = (-UERot) * DNFRot;
-										UERot.Normalize();
-										//debugf(TEXT("     -> (%f,%f,%f,%f)"), UERot.X, UERot.Y, UERot.Z, UERot.W);
-										Tmp(z).quat = Tmp(z).quat * (-UERot);
-									}
-								}
-							}
-						}
-						ExchangeArray(Tmp, F.rotates);
 					}
 					{
 						TArray<CCpjSeqTranslate> Tmp;
@@ -1385,19 +1312,20 @@ class DnfMesh
 						Tmp.Add(numSkel);
 						FVector Delta;
 						for (z = 0; z < numSkel; ++z)
-							Tmp(z).translate = skm_Bones(z).baseCoords.t / F.scales(z).scale;
+						{
+							Tmp(z).translate = FVector(0, 0, 0);
+							Tmp(z).boneIndex = INDEX_NONE;
+						}
 						for (z = 0; z < F.translates.Num(); ++z)
 						{
 							INT iRef = FindBone(*A.m_BoneInfo(F.translates(z).boneIndex).name);
 							if (iRef >= 0)
 							{
 								Delta = (F.translates(z).translate / F.scales(iRef).scale);
-								Tmp(iRef).translate = Delta << skm_Bones(iRef).baseCoords;
+								Tmp(iRef).translate = Delta << skm_Bones(iRef).baseCoords.mr;
+								Tmp(iRef).boneIndex = z;
 							}
 						}
-						for (z = 0; z < numSkel; ++z)
-							if (skm_Bones(z).parentBone)
-								Tmp(z).translate = Tmp(z).translate << F.GetParentAxes(*skm_Bones(z).parentBone); // DNF bone coords -> world coords
 						ExchangeArray(Tmp, F.translates);
 					}
 
@@ -1406,18 +1334,6 @@ class DnfMesh
 					{
 						F.rotates(z).quat = ToUEQuat(F.rotates(z).quat);
 						F.translates(z).translate = ToUEVector(F.translates(z).translate);
-					}
-					for (z = 0; z < numSkel; ++z)
-					{
-						CCpjSklBone& B = skm_Bones(z);
-						FVector V = F.translates(z).translate;
-						if (B.parentBone)
-						{
-							FCoords C = F.GetParentFCoords(*B.parentBone);
-							F.translates(z).FinalPose = F.translates(z).translate.TransformVectorBy(C.Transpose());
-						}
-						else F.translates(z).FinalPose = F.translates(z).translate;
-						F.rotates(z).FinalQuat = F.rotates(z).quat;
 					}
 				}
 			}
@@ -1453,29 +1369,99 @@ class DnfMesh
 				{
 					FCoords C = B.parentBone->GetParentFCoords();
 					B.FinalPose = B.baseCoords.t.TransformVectorBy(C.Transpose());
+					B.FinalQuat = B.baseCoords.r;
 				}
-				else B.FinalPose = B.baseCoords.t;
-				B.FinalQuat = B.baseCoords.r;
+				else
+				{
+					B.FinalPose = B.baseCoords.t;
+					B.FinalQuat = B.baseCoords.r;
+				}
 			}
-#if DEBUG_SINGLE_MESH
+			for (i = 0; i < Animations.Num(); ++i)
+			{
+				FAnimSequence& A = Animations(i);
+				for (j = 0; j < A.m_Frames.Num(); ++j)
+				{
+					CCpjSeqFrame& F = A.m_Frames(j);
+
+					for (z = 0; z < numSkel; ++z)
+					{
+						CCpjSklBone& B = skm_Bones(z);
+						if (B.parentBone)
+						{
+							FCoords C = F.GetParentFCoords(*B.parentBone);
+							F.translates(z).FinalPose = B.FinalPose + F.translates(z).translate.TransformVectorBy(C.Transpose());
+						}
+						else F.translates(z).FinalPose = F.translates(z).translate;
+					}
+				}
+			}
+#if DEBUG_SINGLE_MESH && FALSE
 			if (!appStricmp(*CurFile, DEBUG_MESH_NAME))
 			{
 				FStringOutputDevice StrT;
 				StrT.Log(TEXT("Class MeshDebug extends Object;\r\n\r\nvar array<vector> V;\r\nvar array<string> B;\r\nvar Mesh Mesh;\r\n\r\ndefaultproperties\r\n{\r\n"));
 				StrT.Logf(TEXT("\tMesh=%ls\r\n"), DEBUG_MESH_NAME);
 				FVector Va, Vb;
+
+				TArray<VCoords3> OutCoords(numSkel), DeltaCoords(numSkel);
+				TArray<BYTE> InUse(numSkel);
+				for (i = 0; i < numSkel; ++i)
+				{
+					OutCoords(i) = skm_Bones(i).baseCoords;
+					DeltaCoords(i) = VCoords3();
+					InUse(i) = FALSE;
+				}
+				for (i = 0; i < Animations.Num(); ++i)
+				{
+					FAnimSequence& A = Animations(i);
+					if (A.AnimName == TEXT("Roar"))
+					{
+						CCpjSeqFrame& F = A.m_Frames(4);
+
+						for (j = 0; j < F.translates.Num(); ++j)
+						{
+							if (F.translates(z).boneIndex >= 0)
+							{
+								InUse(j) = TRUE;
+								DeltaCoords(j).t = F.translates(j).translate;
+							}
+						}
+						for (j = 0; j < F.scales.Num(); ++j)
+						{
+							if (F.scales(z).boneIndex >= 0)
+							{
+								InUse(j) = TRUE;
+								DeltaCoords(j).s = F.scales(j).scale;
+							}
+						}
+						for (j = 0; j < F.rotates.Num(); ++j)
+						{
+							if (F.rotates(z).boneIndex >= 0)
+							{
+								InUse(j) = TRUE;
+								DeltaCoords(j).mr >>= ToUEQuat(F.rotates(j).axes.GetQuat());
+							}
+						}
+					}
+				}
+				for (i = 0; i < numSkel; ++i)
+				{
+					if (InUse(i))
+						OutCoords(i) = DeltaCoords(i) << OutCoords(i);
+					if (skm_Bones(i).parentBone)
+					{
+						OutCoords(i) <<= OutCoords(skm_Bones(i).ParentIndex);
+					}
+				}
 				for (i = 0; i < numSkel; ++i)
 				{
 					CCpjSklBone& B = skm_Bones(i);
 					if (B.parentBone)
 					{
-#if 0
-						Va = B.GetParentCoords().t;
-						Vb = B.parentBone->GetParentCoords().t;
-#else
-						Va = B.GetParentPose();
-						Vb = B.parentBone->GetParentPose();
-#endif
+						Va = OutCoords(i).t;
+						Vb = OutCoords(B.ParentIndex).t;
+
 						Va = (Va * CMD_Scale) - CMD_Offset;
 						Vb = (Vb * CMD_Scale) - CMD_Offset;
 						StrT.Logf(TEXT("\tV.Add((X=%f,Y=%f,Z=%f))\r\n\tV.Add((X=%f,Y=%f,Z=%f))\r\n"), Va.X, Va.Y, Va.Z, Vb.X, Vb.Y, Vb.Z);
@@ -1579,6 +1565,15 @@ class DnfMesh
 
 					debugf(TEXT("Animation[%ls] Frames %i Events %i Bones %i"), *SecName, INT(file->numFrames), INT(file->numEvents), INT(file->numBoneInfo));
 
+					// bone info
+					for (i = 0; i < file->numBoneInfo; i++)
+					{
+						SSeqBoneInfo* iI = &fileBoneInfo[i];
+						CCpjSeqBoneInfo* oI = &as->m_BoneInfo(i);
+						oI->name = ReadStringByte(&file->dataBlock[iI->ofsName]);
+						oI->srcLength = iI->srcLength;
+					}
+
 					// frames
 					for (i = 0; i < file->numFrames; i++)
 					{
@@ -1591,6 +1586,14 @@ class DnfMesh
 						{
 							SSeqBoneTranslate* iT = &fileBoneTranslate[iF->firstBoneTranslate + j];
 							CCpjSeqTranslate* oT = &oF->translates(j);
+
+#if EDIT_FILE_TEXT
+							iT->translate = FVector(0, 0, 0);
+							OutFile->Seek(position + (reinterpret_cast<BYTE*>(&iT->translate) - reinterpret_cast<BYTE*>(fullData.GetData())));
+							FLOAT zf = 0.f;
+							*OutFile << zf << zf << zf;
+#endif
+
 							oT->boneIndex = iT->boneIndex;
 							oT->translate = iT->translate;
 						}
@@ -1600,16 +1603,21 @@ class DnfMesh
 							SSeqBoneRotate* iR = &fileBoneRotate[iF->firstBoneRotate + j];
 							CCpjSeqRotate* oR = &oF->rotates(j);
 							oR->boneIndex = iR->boneIndex;
-#if 0
-							oR->roll = 5;
-							oR->pitch = 0;
-							oR->yaw = 0;
-#else
-							oR->roll = iR->roll;
-							oR->pitch = iR->pitch;
-							oR->yaw = iR->yaw;
+							
+#if EDIT_FILE_TEXT
+							iR->roll = 0;
+							iR->pitch = 0;
+							iR->yaw = 0;
+							if (as->m_BoneInfo(iR->boneIndex).name == TEXT("ABDOMEN"))
+								iR->yaw = 400 * i;
+							//if (as->m_BoneInfo(iR->boneIndex).name == TEXT("CHEST"))
+							//	iR->yaw = -400 * i;
+
+							OutFile->Seek(position + (reinterpret_cast<BYTE*>(&iR->roll) - reinterpret_cast<BYTE*>(fullData.GetData())));
+							*OutFile << iR->roll << iR->pitch << iR->yaw;
 #endif
-							oR->axes = VAxes3(FRotator(oR->pitch, oR->yaw, oR->roll));
+
+							oR->axes = ~VAxes3(FRotator(iR->pitch, iR->yaw, iR->roll));
 							oR->quat = oR->axes.GetQuat();
 						}
 						oF->scales.Add(iF->numBoneScale);
@@ -1631,15 +1639,6 @@ class DnfMesh
 						oE->time = iE->time;
 						if (iE->ofsParam != 0xFFFFFFFF)
 							oE->paramString = ReadStringByte(&file->dataBlock[iE->ofsParam]);
-					}
-
-					// bone info
-					for (i = 0; i < file->numBoneInfo; i++)
-					{
-						SSeqBoneInfo* iI = &fileBoneInfo[i];
-						CCpjSeqBoneInfo* oI = &as->m_BoneInfo(i);
-						oI->name = ReadStringByte(&file->dataBlock[iI->ofsName]);
-						oI->srcLength = iI->srcLength;
 					}
 				}
 				else if (SubHrd.riffMagic == KRN_FOURCC("MACB"))
@@ -1892,8 +1891,9 @@ class DnfMesh
 						oB->baseCoords = VCoords3(iB->baseRotate, iB->baseTranslate, iB->baseScale);
 						oB->length = iB->length;
 
-						//FRotator R = oB->baseCoords.r;
-						//debugf(TEXT("Bone %ls %i,%i,%i (%f,%f,%f,%f)"), *oB->name, R.Yaw, R.Pitch, R.Roll, oB->baseCoords.r.X, oB->baseCoords.r.Y, oB->baseCoords.r.Z, oB->baseCoords.r.W);
+						/*FRotator R = oB->baseCoords.r;
+						FQuat Q = R.Quaternion();
+						debugf(TEXT("Bone %ls %i,%i,%i (%f,%f,%f,%f)(%f,%f,%f,%f)"), *oB->name, R.Yaw, R.Pitch, R.Roll, oB->baseCoords.r.X, oB->baseCoords.r.Y, oB->baseCoords.r.Z, oB->baseCoords.r.W, Q.X, Q.Y, Q.Z, Q.W);*/
 					}
 
 					// Assign parent index!
@@ -2021,12 +2021,28 @@ class DnfMesh
 	}
 	UBOOL LoadChunked(const TCHAR* File, const TCHAR* ChunkID)
 	{
+#if EDIT_FILE_TEXT
+		FString OutputFile = FString(File) + TEXT(".txt");
+		if (GFileManager->FileSize(*OutputFile) < 0)
+		{
+			GWarn->Logf(TEXT("OrginalFile %ls not found!"), *OutputFile);
+			return FALSE;
+		}
+		OutFile = GFileManager->CreateFileWriter(File, FILEWRITE_Append, GWarn);
+		if (!OutFile)
+			return FALSE;
+		FArchive* Ar = GFileManager->CreateFileReader(*OutputFile, 0, GWarn);
+#else
 		FArchive* Ar = GFileManager->CreateFileReader(File, 0, GWarn);
+#endif
 		if (!Ar)
 			return FALSE;
 
 		UBOOL bResult = LoadFile(*Ar, ChunkID);
 		delete Ar;
+#if EDIT_FILE_TEXT
+		delete OutFile;
+#endif
 
 		if (bResult)
 		{
@@ -2543,8 +2559,8 @@ void DnfMesh::ExportPSA(FArchive& Ar)
 		{
 			FNamedBoneBinary& B = AnimBones(i);
 			CCpjSklBone& RB = skm_Bones(i);
-			B.BonePos.Orientation = RB.baseCoords.r;
-			B.BonePos.Position = RB.baseCoords.t;
+			B.BonePos.Orientation = RB.FinalQuat;
+			B.BonePos.Position = RB.FinalPose;
 			B.Flags = 0;
 			CopyStringToAnsi(B.Name, *RB.name, ARRAY_COUNT(B.Name));
 			INT numCh = 0;
@@ -2587,7 +2603,7 @@ void DnfMesh::ExportPSA(FArchive& Ar)
 				TTime = FLOAT(z);
 				for (j = 0; j < NumBones; ++j)
 				{
-					Q->Orientation = F.rotates(j).FinalQuat;
+					Q->Orientation = F.rotates(j).quat;
 					Q->Position = F.translates(j).FinalPose;
 					Q->Time = TTime;
 					++Q;

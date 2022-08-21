@@ -2356,6 +2356,10 @@ public:
 			W*Q.W - X*Q.X - Y*Q.Y - Z*Q.Z
 			);
 	}
+	FQuat operator/(const FQuat& Q) const
+	{
+		return *this * (-Q);
+	}
 
 	FQuat operator*( const FLOAT& Scale ) const
 	{
@@ -2479,6 +2483,10 @@ public:
 	inline UBOOL IsZero() const
 	{
 		return (Abs(X) < DELTA) && (Abs(Y) < DELTA) && (Abs(Z) < DELTA) && (Abs(W) < DELTA);
+	}
+	inline FQuat MirrorQuat() const
+	{
+		return FQuat(-X, Y, Z, -W);
 	}
 };
 

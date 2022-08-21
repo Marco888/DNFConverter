@@ -5,7 +5,7 @@
 
 #define DEBUG_SINGLE_MESH 0
 #if DEBUG_SINGLE_MESH
-#define DEBUG_MESH_NAME TEXT("Octobrain")
+#define DEBUG_MESH_NAME TEXT("alien_Adultsnatcher")
 #endif
 
 #include "DnfMesh.h"
