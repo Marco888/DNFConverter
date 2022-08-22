@@ -839,7 +839,7 @@ struct CCpjSeqRotate
 {
 public:
 	INT boneIndex;
-	FQuat quat,InvQuat;
+	FQuat quat;
 	VAxes3 axes;
 };
 struct CCpjSeqScale
@@ -1297,12 +1297,10 @@ class DnfMesh
 							if (skm_Bones(z).parentBone)
 							{
 								F.rotates(z).quat = skm_Bones(z).baseCoords.r * F.rotates(z).quat;
-								F.rotates(z).InvQuat = skm_Bones(z).baseCoords.r / F.rotates(z).quat;
 							}
 							else
 							{
 								F.rotates(z).quat = skm_Bones(z).baseCoords.r / F.rotates(z).quat;
-								F.rotates(z).InvQuat = F.rotates(z).quat;
 							}
 						}
 					}
@@ -1322,7 +1320,9 @@ class DnfMesh
 							if (iRef >= 0)
 							{
 								Delta = (F.translates(z).translate / F.scales(iRef).scale);
-								Tmp(iRef).translate = Delta << skm_Bones(iRef).baseCoords.mr;
+								if (skm_Bones(iRef).parentBone)
+									Tmp(iRef).translate = Delta;
+								else Tmp(iRef).translate = Delta << skm_Bones(iRef).baseCoords.mr;
 								Tmp(iRef).boneIndex = z;
 							}
 						}
@@ -1389,8 +1389,8 @@ class DnfMesh
 						CCpjSklBone& B = skm_Bones(z);
 						if (B.parentBone)
 						{
-							FCoords C = F.GetParentFCoords(*B.parentBone);
-							F.translates(z).FinalPose = B.FinalPose + F.translates(z).translate.TransformVectorBy(C.Transpose());
+							//FCoords C = F.GetParentFCoords(*B.parentBone);
+							F.translates(z).FinalPose = B.FinalPose + F.translates(z).translate; // .TransformVectorBy(C.Transpose());
 						}
 						else F.translates(z).FinalPose = F.translates(z).translate;
 					}
