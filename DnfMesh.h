@@ -1065,7 +1065,7 @@ inline void SwapBones(CCpjSklBone* B, const INT Num, const INT IndexA, const INT
 
 class DnfMesh
 {
-	FString CurFile;
+	FString CurFile, BasePath;
 
 	TArray<FAnimSequence> Animations; // Sequences
 	TArray<CCpjMacSection> m_Sections; // MAC
@@ -1140,10 +1140,18 @@ class DnfMesh
 	inline void CalcBestScaling()
 	{
 		FBox TotalBounds(0);
-		for (INT i = 0; i < m_Frames.Num(); ++i)
+		if (IsAnimatedMesh())
 		{
-			for (INT j = (m_Frames(i).m_PurePos.Num() - 1); j >= 0; --j)
-				TotalBounds += m_Frames(i).m_PurePos(j);
+			for (INT i = 0; i < m_Frames.Num(); ++i)
+			{
+				for (INT j = (m_Frames(i).m_PurePos.Num() - 1); j >= 0; --j)
+					TotalBounds += m_Frames(i).m_PurePos(j);
+			}
+		}
+		else
+		{
+			for (INT i = 0; i < m_Verts.Num(); ++i)
+				TotalBounds += m_Verts(i).refPosition;
 		}
 		TotalBounds.GetCenterAndExtents(VertOrigin, VertScaling);
 		VertScaling = FVector(1023.f / VertScaling.X, 1023.f / VertScaling.Y, 511.f / VertScaling.Z);
@@ -1207,17 +1215,44 @@ class DnfMesh
 						CMD_Bounds.Max.Y = ParseNextFloat(&Cmd);
 						CMD_Bounds.Max.Z = ParseNextFloat(&Cmd);
 					}
+					else if (ParseCommand(&Cmd, TEXT("AddSequences")))
+					{
+						FString Parm = Cmd;
+						if (Parm.Left(1) == TEXT("\""))
+							Parm = Parm.Mid(1, Parm.Len() - 2);
+						if (Parm != TEXT("NULL"))
+						{
+							FString FullPath = BasePath + Parm;
+							debugf(TEXT("Adding sequences from: %ls"), *FullPath);
+
+							DnfMesh SubMesh(*BasePath);
+							if (SubMesh.LoadChunked(*FullPath, TEXT(""), KRN_FOURCC("SEQB")))
+							{
+								for (INT i = 0; i < SubMesh.Animations.Num(); ++i)
+									new (Animations) FAnimSequence(SubMesh.Animations(i));
+							}
+							else warnf(TEXT("Failed to load subsequence file!"));
+						}
+					}
 					//else debugf(NAME_ExecWarning, TEXT("Unknown command: %ls"), Cmd);
 				}
 			}
 		}
 		if (IsVertexMesh())
 		{
-			for (i = 0; i < m_Frames.Num(); ++i)
+			if (IsAnimatedMesh())
 			{
-				CCpjFrmFrame& F = m_Frames(i);
-				for (j = 0; j < F.m_PurePos.Num(); ++j)
-					F.m_PurePos(j) = ToUECoords(F.m_PurePos(j));
+				for (i = 0; i < m_Frames.Num(); ++i)
+				{
+					CCpjFrmFrame& F = m_Frames(i);
+					for (j = 0; j < F.m_PurePos.Num(); ++j)
+						F.m_PurePos(j) = ToUECoords(F.m_PurePos(j));
+				}
+			}
+			else
+			{
+				for (INT i = 0; i < m_Verts.Num(); ++i)
+					m_Verts(i).refPosition = ToUECoords(m_Verts(i).refPosition);
 			}
 		}
 		else
@@ -1488,7 +1523,7 @@ class DnfMesh
 		}
 		return v;
 	}
-	UBOOL LoadFile(FArchive& Ar, const TCHAR* GroupName)
+	UBOOL LoadFile(FArchive& Ar, const TCHAR* GroupName, NDword LimitType = 0)
 	{
 		SCpjFileHeader header;
 		Ar << header;
@@ -1525,6 +1560,9 @@ class DnfMesh
 
 			// read RIFF magic and length fields
 			Ar << SubHrd;
+			if (LimitType && SubHrd.riffMagic != LimitType)
+				continue;
+
 			NDword timeStamp, ofsName;
 			Ar << timeStamp << ofsName;
 
@@ -2019,7 +2057,7 @@ class DnfMesh
 		}
 		return TRUE;
 	}
-	UBOOL LoadChunked(const TCHAR* File, const TCHAR* ChunkID)
+	UBOOL LoadChunked(const TCHAR* File, const TCHAR* ChunkID, NDword LimitType = 0)
 	{
 #if EDIT_FILE_TEXT
 		FString OutputFile = FString(File) + TEXT(".txt");
@@ -2038,13 +2076,13 @@ class DnfMesh
 		if (!Ar)
 			return FALSE;
 
-		UBOOL bResult = LoadFile(*Ar, ChunkID);
+		UBOOL bResult = LoadFile(*Ar, ChunkID, LimitType);
 		delete Ar;
 #if EDIT_FILE_TEXT
 		delete OutFile;
 #endif
 
-		if (bResult)
+		if (bResult && !LimitType)
 		{
 			if (!m_Textures.Num())
 			{
@@ -2059,6 +2097,10 @@ class DnfMesh
 		return bResult;
 	}
 public:
+	DnfMesh(const TCHAR* Path)
+		: BasePath(Path)
+	{}
+
 	UBOOL LoadMesh(const TCHAR* File, const TCHAR* MeshName)
 	{
 		CurFile = MeshName;
@@ -2149,7 +2191,7 @@ public:
 			else Ar.Log(TEXT(" MLOD=0\r\n"));
 			{
 				FVector V = (CMD_Offset - VertOrigin) * VertScaling;
-				Ar.Logf(TEXT("#exec MESH ORIGIN MESH=%ls X=%.3f Y=%.3f Z=%.3f YAW=0\r\n"), MeshName, V.X, V.Y, V.Z);
+				Ar.Logf(TEXT("#exec MESH ORIGIN MESH=%ls X=%.3f Y=%.3f Z=%.3f\r\n"), MeshName, V.X, V.Y, V.Z);
 			}
 			{
 				INT numFrames = 0;
@@ -2845,21 +2887,27 @@ void DnfMesh::Export3DA(FArchive& Ar)
 					}
 				}
 			}
-		}
-		else if (relay)
-		{
-			const CCpjGeoVert* iv = &m_Verts(0);
-			for (i = 0; i < NumVerts; ++i)
-			{
-				*Out = FMeshVert(PreMulti(iv[relay[i]].refPosition));
-			}
+			
 		}
 		else
 		{
-			const CCpjGeoVert* iv = &m_Verts(0);
-			for (i = 0; i < NumVerts; ++i)
+			if (relay)
 			{
-				*Out = FMeshVert(PreMulti(iv[i].refPosition));
+				const CCpjGeoVert* iv = &m_Verts(0);
+				for (i = 0; i < NumVerts; ++i)
+				{
+					*Out = FMeshVert(PreMulti(iv[relay[i]].refPosition));
+					++Out;
+				}
+			}
+			else
+			{
+				const CCpjGeoVert* iv = &m_Verts(0);
+				for (i = 0; i < NumVerts; ++i)
+				{
+					*Out = FMeshVert(PreMulti(iv[i].refPosition));
+					++Out;
+				}
 			}
 		}
 		Ar.Serialize(&FrameVerts(0), sizeof(FMeshVert) * FrameVerts.Num());

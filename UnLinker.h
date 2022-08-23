@@ -387,7 +387,7 @@ public:
 
 			FName NAME_DukeMesh(TEXT("DukeMesh"));
 			DukeMesh DM;
-			DnfMesh Df;
+			DnfMesh Df(BasePath);
 			FStringOutputDevice StrExec;
 			INT num = 0;
 			for (INT i = 0; i < Summary.ExportCount; i++)
