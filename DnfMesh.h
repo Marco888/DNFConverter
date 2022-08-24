@@ -1091,6 +1091,7 @@ class DnfMesh
 	FVector VertOrigin, VertScaling;
 
 	TArray<FString> ExportedTex;
+	INT HackMode;
 
 	// Cmd data
 	FString CMD_Author;
@@ -1276,11 +1277,6 @@ class DnfMesh
 			for (i = 0; i < Animations.Num(); ++i)
 			{
 				FAnimSequence& A = Animations(i);
-				/*if (A.AnimName != TEXT("IdleA"))
-				{
-					Animations.Remove(i--);
-					continue;
-				}*/
 
 				for (j = 0; j < A.m_Frames.Num(); ++j)
 				{
@@ -1541,6 +1537,14 @@ class DnfMesh
 		SCpjFileHeader SubHrd;
 		NDword position = sizeof(SCpjFileHeader);
 		UBOOL bIsLoop = FALSE;
+		HackMode = 0;
+
+		// Special hack meshes...
+		if (CurFile == TEXT("BuddBot"))
+			HackMode = 1;
+		else if (CurFile == TEXT("Octobrain"))
+			HackMode = 2;
+
 		while (1)
 		{
 			if (bIsLoop)
@@ -1600,6 +1604,7 @@ class DnfMesh
 					as->m_Events.Empty(file->numEvents); as->m_Events.AddZeroed(file->numEvents);
 					as->m_BoneInfo.Empty(file->numBoneInfo); as->m_BoneInfo.AddZeroed(file->numBoneInfo);
 					as->m_Rate = file->playRate;
+					UBOOL bHack;
 
 					debugf(TEXT("Animation[%ls] Frames %i Events %i Bones %i"), *SecName, INT(file->numFrames), INT(file->numEvents), INT(file->numBoneInfo));
 
@@ -1620,11 +1625,22 @@ class DnfMesh
 						if (iF->ofsVertFrameName != 0xFFFFFFFF)
 							oF->vertFrameName = ReadStringByte(&file->dataBlock[iF->ofsVertFrameName]);
 						oF->translates.Add(iF->numBoneTranslate);
+						bHack = FALSE;
 						for (j = 0; j < iF->numBoneTranslate; j++)
 						{
 							SSeqBoneTranslate* iT = &fileBoneTranslate[iF->firstBoneTranslate + j];
 							CCpjSeqTranslate* oT = &oF->translates(j);
 
+							if (HackMode == 1)
+							{
+								if (as->m_BoneInfo(iT->boneIndex).name == TEXT("arm"))
+								{
+									iT->translate.X = iT->translate.Z - 12.f;
+									iT->translate.Y = 0.f;
+									iT->translate.Z = 0.f;
+									bHack = TRUE;
+								}
+							}
 #if EDIT_FILE_TEXT
 							iT->translate = FVector(0, 0, 0);
 							OutFile->Seek(position + (reinterpret_cast<BYTE*>(&iT->translate) - reinterpret_cast<BYTE*>(fullData.GetData())));
@@ -1635,6 +1651,13 @@ class DnfMesh
 							oT->boneIndex = iT->boneIndex;
 							oT->translate = iT->translate;
 						}
+						if (HackMode == 1 && !bHack)
+						{
+							// Add arm translation to hide inside body.
+							CCpjSeqTranslate* oT = new (oF->translates) CCpjSeqTranslate();
+							oT->boneIndex = 1;
+							oT->translate = FVector(-12.f, 0.f, 0.f);
+						}
 						oF->rotates.Add(iF->numBoneRotate);
 						for (j = 0; j < iF->numBoneRotate; j++)
 						{
@@ -1642,14 +1665,46 @@ class DnfMesh
 							CCpjSeqRotate* oR = &oF->rotates(j);
 							oR->boneIndex = iR->boneIndex;
 							
+							if (HackMode == 1)
+							{
+								if (as->m_BoneInfo(iR->boneIndex).name == TEXT("arm"))
+								{
+									iR->pitch = iR->roll;
+									iR->roll = 0;
+									iR->yaw = 0;
+								}
+								else if (as->m_BoneInfo(iR->boneIndex).name == TEXT("DOOR"))
+								{
+									iR->pitch = 0;
+									iR->roll = 18663 + iR->roll;
+									iR->yaw = 0;
+								}
+							}
+							else if (HackMode == 2)
+							{
+								if (as->m_BoneInfo(iR->boneIndex).name == TEXT("Jaw"))
+								{
+									Exchange(iR->yaw, iR->pitch);
+									iR->yaw = -iR->yaw;
+								}
+								else if (as->m_BoneInfo(iR->boneIndex).name == TEXT("TentRB1") || as->m_BoneInfo(iR->boneIndex).name == TEXT("TentRM1") || as->m_BoneInfo(iR->boneIndex).name == TEXT("TentRF1"))
+								{
+									Exchange(iR->yaw, iR->roll);
+									iR->roll = -iR->roll;
+								}
+								/*else if (as->m_BoneInfo(iR->boneIndex).name == TEXT("TentLB1") || as->m_BoneInfo(iR->boneIndex).name == TEXT("TentLF1") || as->m_BoneInfo(iR->boneIndex).name == TEXT("TentLM1"))
+								{
+									Exchange(iR->roll, iR->pitch);
+									iR->pitch = -iR->pitch;
+								}*/
+							}
 #if EDIT_FILE_TEXT
 							iR->roll = 0;
 							iR->pitch = 0;
 							iR->yaw = 0;
-							if (as->m_BoneInfo(iR->boneIndex).name == TEXT("ABDOMEN"))
-								iR->yaw = 400 * i;
-							//if (as->m_BoneInfo(iR->boneIndex).name == TEXT("CHEST"))
-							//	iR->yaw = -400 * i;
+							if (as->m_BoneInfo(iR->boneIndex).name == TEXT("TentRB1") || as->m_BoneInfo(iR->boneIndex).name == TEXT("TentRM1") || as->m_BoneInfo(iR->boneIndex).name == TEXT("TentRF1") ||
+								as->m_BoneInfo(iR->boneIndex).name == TEXT("TentLB1") || as->m_BoneInfo(iR->boneIndex).name == TEXT("TentLF1") || as->m_BoneInfo(iR->boneIndex).name == TEXT("TentLM1"))
+								iR->roll = 400 * i;
 
 							OutFile->Seek(position + (reinterpret_cast<BYTE*>(&iR->roll) - reinterpret_cast<BYTE*>(fullData.GetData())));
 							*OutFile << iR->roll << iR->pitch << iR->yaw;
@@ -1926,12 +1981,18 @@ class DnfMesh
 						oB->parentBone = NULL;
 						if (iB->parentIndex != 0xFFFFFFFF)
 							oB->parentBone = &skm_Bones(iB->parentIndex);
+						if (HackMode == 1)
+						{
+							if (oB->name == TEXT("arm"))
+								iB->baseTranslate.X += 14.f;
+						}
 						oB->baseCoords = VCoords3(iB->baseRotate, iB->baseTranslate, iB->baseScale);
 						oB->length = iB->length;
 
-						/*FRotator R = oB->baseCoords.r;
-						FQuat Q = R.Quaternion();
-						debugf(TEXT("Bone %ls %i,%i,%i (%f,%f,%f,%f)(%f,%f,%f,%f)"), *oB->name, R.Yaw, R.Pitch, R.Roll, oB->baseCoords.r.X, oB->baseCoords.r.Y, oB->baseCoords.r.Z, oB->baseCoords.r.W, Q.X, Q.Y, Q.Z, Q.W);*/
+#if DEBUG_SINGLE_MESH
+						FRotator R = oB->baseCoords.r;
+						debugf(TEXT("Bone %ls %i,%i,%i (%f,%f,%f,%f) (%f,%f,%f)"), *oB->name, R.Yaw, R.Pitch, R.Roll, oB->baseCoords.r.X, oB->baseCoords.r.Y, oB->baseCoords.r.Z, oB->baseCoords.r.W, oB->baseCoords.t.X, oB->baseCoords.t.Y, oB->baseCoords.t.Z);
+#endif
 					}
 
 					// Assign parent index!
